@@ -2,7 +2,7 @@
 
 Eagleway Node Agent 是部署在自有 VPS 上的节点控制代理。它接收 Eagleway Network API 的控制请求，管理本机协议运行时和用户，并向中心服务上报流量快照。
 
-项目当前处于**文档与契约冻结阶段**，尚未开始业务代码实现。
+项目当前已经进入 MVP 实施阶段。已实现节点 API、SQLite 状态、Trojan-Go 用户适配、流量上报、日志读取、Ubuntu/宝塔预检和受限提权 helper；真实 Ubuntu 与宝塔 VPS 灰度仍是发布前门槛。
 
 ## 项目定位
 
@@ -27,7 +27,7 @@ Agent 不是中心数据库的副本。中心服务始终是节点配置、用�
 - 节点主动向中心上报流量。
 - 安全的本机日志文件列表和分页读取。
 - 空白 Ubuntu VPS 与 Ubuntu 宝塔环境的预检和安装。
-- 中断恢复、幂等控制和结构化错误。
+- 中断识别、幂等控制和结构化错误。
 
 不包含：
 
@@ -53,4 +53,41 @@ Agent 不是中心数据库的副本。中心服务始终是节点配置、用�
 第一阶段使用中心固定出口 IP 白名单限制控制接口访问。公网传输仍建议使用 HTTPS；如果暂时使用 HTTP，必须同时在云安全组和主机防火墙限制来源，不得将控制端口开放给任意公网地址。
 
 用户 credential、assignmentKey、证书私钥、完整连接配置和命令参数不得写入普通日志。
+
+## 本地开发
+
+```bash
+cp .env.example .env
+# 至少填写 NODE_ID，并在不测试上报时设置 REPORTING_ENABLED=false
+pnpm install
+pnpm verify
+```
+
+## Ubuntu Bootstrap
+
+在准备好的源码目录执行：
+
+```bash
+sudo ./scripts/bootstrap-ubuntu.sh \
+  /path/to/eagleway-node-agent \
+  <node-id> \
+  <center-ip/32> \
+  <center-api-url>
+```
+
+Bootstrap 会创建低权限用户、安装 PM2、构建项目、安装受限 helper 并配置单实例开机启动。应用发布目录和 helper 均归 root 所有，Agent 用户只有状态、密钥和日志目录所需权限。
+
+完成后还必须由 root 在 `/etc/eagleway-node-agent/runtime-policy.json` 配置 Trojan-Go artifact 的 HTTPS 地址和 SHA-256，然后重启 Agent。helper 只信任这个不可由 Agent 修改的策略文件，不接受控制请求指定下载物：
+
+```json
+{
+  "archiveUrl": "https://example.com/trojan-go-linux-amd64.zip",
+  "archiveSha256": "64-character-lowercase-sha256"
+}
+```
+
+## 当前验收状态
+
+- 本地类型检查、Nest 构建和自动化测试已覆盖配置、SQLite、加密、日志边界、IP 处理以及 Trojan-Go 大整数/无 shell 参数调用。
+- 普通 Ubuntu 和宝塔的真实 VPS 生命周期灰度尚未完成，因此当前版本是可联调 MVP，不应直接批量投产。
 

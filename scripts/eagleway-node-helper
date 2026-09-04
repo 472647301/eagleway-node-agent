@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+
+exec /usr/bin/node /opt/eagleway-node-agent/current/dist/helper.js "$@"

@@ -1,6 +1,6 @@
 # 中心 API 配套改造
 
-状态：Draft v0.1  
+状态：MVP 已实施
 更新时间：2026-09-04
 
 目标项目：`eagleway-network-api`
@@ -31,12 +31,12 @@
 - GET `/manage/nodes/:nodeId/control/logs/files`
 - GET `/manage/nodes/:nodeId/control/logs`
 
-建议变化：
+已实施变化：
 
-- install/uninstall 管理端响应使用 HTTP 202。
+- install/uninstall 管理端响应使用 HTTP 202，start/stop 和用户操作使用 HTTP 200。
 - 命令响应 DTO 改为 operation/state 结构。
 - status 返回类型化的 AgentStatus。
-- traffic 返回类型化的流量快照。
+- status 和 traffic 返回类型化结构，NodeClient 在写入状态或向管理端返回前校验 Agent envelope。
 - 管理端仍只接触 nodeId，不接触 Agent 内部运行时标识。
 
 ## 3. NodeClientService
@@ -60,12 +60,11 @@
 
 ## 4. 状态收敛任务
 
-新增中心后台任务，轮询以下节点：
+中心后台任务每 30 秒轮询以下启用节点：
 
 - status 为 installing。
 - status 为 uninstalling。
-- 最近存在活动 operation。
-- requiresUserSync 为 true。
+- online、stopped 和 offline 状态，用于健康探测与恢复。
 
 建议流程：
 
@@ -79,7 +78,7 @@
 → 记录结构化日志
 ```
 
-轮询建议指数退避并设置最长安装观察时间。连接失败时标记 offline 或记录探测失败，但不能立即把进行中的安装判定为失败。
+轮询使用数据库任务锁避免中心多实例重复执行；单次最多处理 100 个节点。连接连续失败 3 次后才标记 offline，单次抖动不会立即改变状态。Agent 返回 `requiresUserSync` 时，只在运行状态为 online 后执行全量同步。
 
 状态映射：
 
@@ -90,10 +89,10 @@
 | stopped | stopped |
 | online | online |
 | uninstalling | uninstalling |
-| error | 建议新增 error，或保存 lastOperationError 并回到稳定状态 |
+| error | 安装失败回到 not_installed；卸载失败回到 stopped |
 | 无法连接 | offline |
 
-推荐中心新增 `error` 状态，避免安装失败与网络离线混淆。
+本阶段没有修改中心数据库枚举。Agent 的 `lastError` 仍保留结构化失败信息，但中心节点状态先回到可重试的稳定状态；后续如果管理端需要持久展示错误历史，再增加独立的 lastOperationError 字段，而不是把网络离线与操作失败混在一起。
 
 ## 5. 用户同步
 

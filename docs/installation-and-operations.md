@@ -44,6 +44,8 @@ Bootstrap 不创建中心业务数据。节点记录应先在中心创建，再�
 - 配置和状态目录不得允许其他普通用户读取。
 - Agent 不直接拥有任意 sudo 权限。
 - privileged helper 文件必须由 root 拥有且不可被 Agent 用户修改。
+- 应用发布目录必须由 root 拥有且不可被 Agent 用户修改，否则 sudo helper 加载发布目录代码会形成提权边界漏洞。
+- runtime artifact 地址和 SHA-256 保存在 root 所有、不可组写/全局写的 `runtime-policy.json`；helper 不信任 HTTP 请求携带的下载参数。
 
 ## 3. PM2 运行方式
 
@@ -96,8 +98,8 @@ helper 不接受任意命令字符串、任意 unit、任意目标路径或 shel
 3. 枚举目标端口监听和相关 vhost。
 4. 如果目标 Trojan 端口被占用，返回 `PORT_IN_USE`。
 5. 查找目标域名已有证书；存在时只读引用。
-6. 不存在证书时，验证 DNS 和 WebRoot ACME 条件。
-7. 以独立文件写入 Agent 配置，不覆盖宝塔已有站点。
+6. 不存在证书时返回 `CERTIFICATE_UNAVAILABLE`，由管理员先在宝塔签发证书；第一阶段不自动改写宝塔 WebRoot。
+7. 只读引用宝塔证书并写入 Agent 自有配置，不覆盖宝塔已有站点。
 8. 执行 Nginx 配置检查，通过后 reload。
 9. 启动并验证 trojan-go。
 10. 只登记 Agent 自己创建的文件和服务。
@@ -110,7 +112,7 @@ helper 不接受任意命令字符串、任意 unit、任意目标路径或 shel
 
 - domain 有合法 A 或 AAAA 记录。
 - DNS 结果满足当前证书方案。
-- HTTP-01 WebRoot 可用，或者存在可复用证书。
+- 普通 Ubuntu 的 HTTP-01 端口可用，或者存在可复用证书；宝塔环境必须已有可复用证书。
 - 证书私钥和证书链匹配。
 - 证书剩余有效期满足最小要求。
 
