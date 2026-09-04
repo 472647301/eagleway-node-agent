@@ -1,7 +1,8 @@
 node_modules/
 dist/
 coverage/
-logs/
+/logs/
+/var/logs/
 *.log
 .env
 .env.local
@@ -11,4 +12,3 @@ logs/
 .DS_Store
 .idea/
 .vscode/
-

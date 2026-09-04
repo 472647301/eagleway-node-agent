@@ -63,6 +63,9 @@ importers:
       '@types/compression':
         specifier: ^1.8.1
         version: 1.8.1
+      '@types/express':
+        specifier: ^5.0.6
+        version: 5.0.6
       '@types/json-bigint':
         specifier: ^1.0.4
         version: 1.0.4
