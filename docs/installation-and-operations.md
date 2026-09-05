@@ -22,7 +22,7 @@ Bootstrap 不创建中心业务数据。节点记录应先在中心创建，再�
 
 ### 1.2 协议安装
 
-中心调用 `/api/trojan/install` 后，Agent 安装和配置 trojan-go。该操作不负责安装或升级 Agent 自身。
+中心调用 `/api/{trojan|vless|vmess}/install` 后，Agent 安装和配置 Xray-core。该操作不负责安装或升级 Agent 自身。
 
 ## 2. 目录与权限
 
@@ -45,7 +45,7 @@ Bootstrap 不创建中心业务数据。节点记录应先在中心创建，再�
 - Agent 不直接拥有任意 sudo 权限。
 - privileged helper 文件必须由 root 拥有且不可被 Agent 用户修改。
 - 应用发布目录必须由 root 拥有且不可被 Agent 用户修改，否则 sudo helper 加载发布目录代码会形成提权边界漏洞。
-- runtime artifact 地址和 SHA-256 保存在 root 所有、不可组写/全局写的 `runtime-policy.json`；helper 不信任 HTTP 请求携带的下载参数。
+- Xray-core 版本、官方 GitHub Release 文件名和 SHA-256 固定在 root 所有的 helper 源码中；helper 不接受 HTTP 请求或环境变量携带的下载参数，升级 runtime 需要发布新版 Agent。
 
 ## 3. PM2 运行方式
 
@@ -79,13 +79,13 @@ helper 不接受任意命令字符串、任意 unit、任意目标路径或 shel
 ## 5. 普通 Ubuntu 安装流程
 
 1. 执行无副作用预检。
-2. 获取固定版本的 trojan-go artifact。
+2. 获取固定版本的 Xray-core artifact。
 3. 校验 SHA-256 和支持的 CPU 架构。
 4. 写入临时目录。
 5. 原子安装二进制、配置和 systemd unit。
 6. 获取或引用证书。
 7. 写入独立 Nginx 配置；先执行配置检查，再 reload。
-8. 启动 trojan-go 并验证 systemd、端口和本地 API。
+8. 启动 Xray-core 并验证 systemd、端口和仅监听 loopback 的 gRPC API。
 9. 记录 owned_resources。
 10. 标记 operation 完成。
 
@@ -101,7 +101,7 @@ helper 不接受任意命令字符串、任意 unit、任意目标路径或 shel
 6. 不存在证书时返回 `CERTIFICATE_UNAVAILABLE`，由管理员先在宝塔签发证书；第一阶段不自动改写宝塔 WebRoot。
 7. 只读引用宝塔证书并写入 Agent 自有配置，不覆盖宝塔已有站点。
 8. 执行 Nginx 配置检查，通过后 reload。
-9. 启动并验证 trojan-go。
+9. 启动并验证 Xray-core。
 10. 只登记 Agent 自己创建的文件和服务。
 
 不实现停止网站抢占 443，也不自动配置 TLS/SNI 多路复用。
@@ -166,7 +166,7 @@ Agent 更新与协议安装分离：
 - 健康检查失败恢复上一发布目录。
 - 数据库迁移必须标记是否可回滚；不可回滚迁移需要先完成兼容版本过渡。
 
-trojan-go 更新同样固定版本、校验 SHA-256，并在更新后验证运行时 API、端口和用户映射。
+Xray-core 更新同样固定版本、校验 SHA-256，并在更新后验证运行时 API、端口和用户映射。
 
 ## 12. 故障恢复
 
@@ -175,4 +175,3 @@ trojan-go 更新同样固定版本、校验 SHA-256，并在更新后验证运�
 - 中心看到 requiresUserSync 后执行完整 users/sync。
 - 安装操作中断：根据 operations.current_stage 和实际主机状态恢复。
 - 上报失败：指数退避；恢复后继续发送当前累计快照，不伪造流量增量。
-

@@ -336,7 +336,7 @@ function sanitizeText(value: string): string {
       '$1[REDACTED]'
     )
     .replace(
-      /(["']?(?:assignmentKey|credential|password|secret|token)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^,\s}\]]+)/gi,
+      /(["']?(?:credential|password|secret|token)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^,\s}\]]+)/gi,
       '$1[REDACTED]'
     )
 }

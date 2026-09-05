@@ -1,9 +1,9 @@
 import { Module } from '@nestjs/common'
-import { TrojanModule } from '@/protocols/trojan/trojan.module'
+import { XrayModule } from '@/protocols/xray/xray.module'
 import { TrafficReporterService } from './traffic-reporter.service'
 
 @Module({
-  imports: [TrojanModule],
+  imports: [XrayModule],
   providers: [TrafficReporterService]
 })
 export class ReportingModule {}

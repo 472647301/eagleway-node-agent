@@ -10,16 +10,18 @@ import {
 } from '@/host/host-inspector.service'
 import { PrivilegedHelperService } from '@/host/privileged-helper.service'
 import { StateStoreService } from '@/state/state-store.service'
+import { XRAY_PROTOCOLS, type XrayProtocol } from './xray.types'
 
-export interface TrojanInstallInput {
+export interface XrayInstallInput {
   nodeId: number
+  protocol: XrayProtocol
   port: number
   domain: string
   proxyUrl: string | null
 }
 
 @Injectable()
-export class TrojanProvisioningService {
+export class XrayProvisioningService {
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly inspector: HostInspectorService,
@@ -27,7 +29,15 @@ export class TrojanProvisioningService {
     private readonly state: StateStoreService
   ) {}
 
-  async preflight(input: TrojanInstallInput): Promise<HostInspection> {
+  async preflight(input: XrayInstallInput): Promise<HostInspection> {
+    const apiPort = Number(this.config.xrayApiAddress.split(':')[1])
+    if (input.port === 80 || input.port === apiPort) {
+      throw new AgentError(
+        'INVALID_REQUEST',
+        'Protocol port conflicts with an Agent-managed local service',
+        400
+      )
+    }
     const host = this.inspector.inspect()
     await this.inspector.assertDomainReady(input.domain)
     await this.inspector.assertPortAvailable(input.port)
@@ -44,20 +54,10 @@ export class TrojanProvisioningService {
     if (host.profile === 'ubuntu' && !certificateAvailable) {
       await this.inspector.assertPortAvailable(80)
     }
-    if (!this.config.trojanGoArchiveUrl || !this.config.trojanGoArchiveSha256) {
-      throw new AgentError(
-        'INVALID_REQUEST',
-        'Trojan-Go artifact URL and SHA-256 are not configured',
-        400
-      )
-    }
     return host
   }
 
-  async install(
-    input: TrojanInstallInput,
-    host: HostInspection
-  ): Promise<void> {
+  async install(input: XrayInstallInput, host: HostInspection): Promise<void> {
     const createsAcmeConfig =
       host.profile === 'ubuntu' &&
       !this.inspector.certificateAvailable(input.domain)
@@ -65,21 +65,23 @@ export class TrojanProvisioningService {
       schemaVersion: 1,
       action: 'install',
       nodeId: input.nodeId,
+      protocol: input.protocol,
       hostProfile: host.profile,
       architecture: host.architecture,
       port: input.port,
       domain: input.domain,
       proxyUrl: input.proxyUrl,
+      apiAddress: this.config.xrayApiAddress,
       acmeEmail: this.config.acmeEmail
     })
     try {
-      await this.helper.run('trojan-install', planPath)
+      await this.helper.run('xray-install', planPath)
       const resources = [
-        ['systemd-unit', 'eagleway-trojan.service'],
-        ['runtime-binary', '/usr/local/bin/trojan-go'],
+        ['systemd-unit', 'eagleway-xray.service'],
+        ['runtime-binary', '/usr/local/bin/xray'],
         [
           'runtime-config',
-          '/etc/eagleway-node-agent/runtimes/trojan-go/config.json'
+          '/etc/eagleway-node-agent/runtimes/xray/config.json'
         ],
         ...(createsAcmeConfig
           ? ([
@@ -94,32 +96,36 @@ export class TrojanProvisioningService {
         this.state.registerOwnedResource({
           resourceType: resourceType!,
           resourceName: resourceName!,
-          ownershipTag: 'eagleway-node-agent:trojan',
+          ownershipTag: 'eagleway-node-agent:xray',
           createdAt: new Date().toISOString(),
           removedAt: null
         })
       }
-      this.state.setMeta('trojan.requiresUserSync', 'true')
+      this.state.setMeta('xray.protocol', input.protocol)
+      this.state.setMeta(`${input.protocol}.requiresUserSync`, 'true')
     } finally {
       safeUnlink(planPath)
     }
   }
 
   async uninstall(): Promise<void> {
-    await this.helper.run('trojan-uninstall')
-    for (const user of this.state.listManagedUsers('trojan')) {
-      this.state.deleteManagedUser(user.assignmentKey)
+    await this.helper.run('xray-uninstall')
+    for (const protocol of XRAY_PROTOCOLS) {
+      for (const user of this.state.listManagedUsers(protocol)) {
+        this.state.deleteManagedUser(user.assignmentId)
+      }
+      this.state.setMeta(`${protocol}.requiresUserSync`, 'true')
     }
-    this.state.setMeta('trojan.requiresUserSync', 'true')
-    this.state.markOwnedResourcesRemoved('eagleway-node-agent:trojan')
+    this.state.deleteMeta('xray.protocol')
+    this.state.markOwnedResourcesRemoved('eagleway-node-agent:xray')
   }
 
   start() {
-    return this.helper.run('trojan-start')
+    return this.helper.run('xray-start')
   }
 
   stop() {
-    return this.helper.run('trojan-stop')
+    return this.helper.run('xray-stop')
   }
 
   private writePlan(value: object): string {

@@ -66,7 +66,7 @@
 范围：
 
 - 固定版本 artifact 及校验。
-- trojan-go 配置生成和校验。
+- Xray-core 三协议配置生成和校验。
 - systemd unit 生命周期。
 - 普通 Ubuntu 安装/卸载。
 - Ubuntu 宝塔安装/卸载。
@@ -80,7 +80,7 @@
 
 - managed_users。
 - credential 加密。
-- assignmentKey ↔ runtime hash 映射。
+- assignmentId ↔ Xray email 映射。
 - 全量 sync。
 - 增量 add/delete。
 - 空数组清理和临时 bootstrap 用户移除。
@@ -92,7 +92,7 @@
 范围：
 
 - 累计字节和速度采集。
-- online 语义验证。
+- managedUserCount 与 Xray 入站用户列表一致性验证。
 - bigint 字符串转换。
 - reportedAt 单调性。
 - 中心 204 上报、超时和退避。
@@ -146,7 +146,7 @@
 - nodeId 不匹配。
 - 非白名单 IP 请求。
 - 日志 `../`、绝对路径和软链接逃逸。
-- 日志与错误中搜索 credential、assignmentKey 和私钥片段。
+- 日志与错误中搜索 credential 和私钥片段。
 
 ### 生命周期
 
@@ -174,7 +174,7 @@
 - 超过 JavaScript 安全整数。
 - 上报乱序和同一时间戳。
 - 中心不可用后恢复。
-- trafficLimitBytes 已达到但不触发任何动作。
+- Xray 重启后 runtimeEpoch 变化，中心从新计数器零点继续累计。
 
 ### 宝塔
 
@@ -200,10 +200,9 @@
 ## 5. 后续版本候选
 
 - xray-core Runtime Adapter。
-- VLESS、VMess、Shadowsocks 协议。
+- Shadowsocks 协议。
 - RHEL 系 Host Adapter。
 - HMAC 或 mTLS 节点鉴权。
 - 443 TLS/SNI 多路复用。
 - 远程 Agent 自更新。
 - 流量额度与超额处置。
-

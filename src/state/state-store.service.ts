@@ -9,13 +9,10 @@ import type {
 } from './state.types'
 
 type ManagedUserRow = {
-  assignment_key: string
+  assignment_id: string
   encrypted_credential: string
   protocol: string
-  runtime: string
-  runtime_user_hash: string
-  ip_limit: number
-  traffic_limit_bytes: string | null
+  runtime_user_id: string
   synced_at: string
 }
 
@@ -40,22 +37,22 @@ export class StateStoreService {
   listManagedUsers(protocol: string): ManagedUserRecord[] {
     const rows = this.database.db
       .prepare(
-        `SELECT assignment_key, encrypted_credential, protocol, runtime,
-                runtime_user_hash, ip_limit, traffic_limit_bytes, synced_at
-           FROM managed_users WHERE protocol = ? ORDER BY assignment_key`
+        `SELECT assignment_id, encrypted_credential, protocol,
+                runtime_user_id, synced_at
+           FROM managed_users WHERE protocol = ? ORDER BY assignment_id`
       )
       .all(protocol) as ManagedUserRow[]
     return rows.map(mapManagedUser)
   }
 
-  findManagedUser(assignmentKey: string): ManagedUserRecord | null {
+  findManagedUser(assignmentId: string): ManagedUserRecord | null {
     const row = this.database.db
       .prepare(
-        `SELECT assignment_key, encrypted_credential, protocol, runtime,
-                runtime_user_hash, ip_limit, traffic_limit_bytes, synced_at
-           FROM managed_users WHERE assignment_key = ?`
+        `SELECT assignment_id, encrypted_credential, protocol,
+                runtime_user_id, synced_at
+           FROM managed_users WHERE assignment_id = ?`
       )
-      .get(assignmentKey) as ManagedUserRow | undefined
+      .get(assignmentId) as ManagedUserRow | undefined
     return row ? mapManagedUser(row) : null
   }
 
@@ -63,34 +60,27 @@ export class StateStoreService {
     this.database.db
       .prepare(
         `INSERT INTO managed_users
-          (assignment_key, encrypted_credential, protocol, runtime,
-           runtime_user_hash, ip_limit, traffic_limit_bytes, synced_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(assignment_key) DO UPDATE SET
+          (assignment_id, encrypted_credential, protocol, runtime_user_id, synced_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(assignment_id) DO UPDATE SET
            encrypted_credential = excluded.encrypted_credential,
            protocol = excluded.protocol,
-           runtime = excluded.runtime,
-           runtime_user_hash = excluded.runtime_user_hash,
-           ip_limit = excluded.ip_limit,
-           traffic_limit_bytes = excluded.traffic_limit_bytes,
+           runtime_user_id = excluded.runtime_user_id,
            synced_at = excluded.synced_at`
       )
       .run(
-        record.assignmentKey,
+        record.assignmentId,
         record.encryptedCredential,
         record.protocol,
-        record.runtime,
-        record.runtimeUserHash,
-        record.ipLimit,
-        record.trafficLimitBytes,
+        record.runtimeUserId,
         record.syncedAt
       )
   }
 
-  deleteManagedUser(assignmentKey: string): void {
+  deleteManagedUser(assignmentId: string): void {
     this.database.db
-      .prepare('DELETE FROM managed_users WHERE assignment_key = ?')
-      .run(assignmentKey)
+      .prepare('DELETE FROM managed_users WHERE assignment_id = ?')
+      .run(assignmentId)
   }
 
   createOperation(record: OperationRecord): void {
@@ -250,6 +240,10 @@ export class StateStoreService {
     return row?.value ?? null
   }
 
+  deleteMeta(key: string): void {
+    this.database.db.prepare('DELETE FROM agent_meta WHERE key = ?').run(key)
+  }
+
   registerOwnedResource(record: OwnedResourceRecord): void {
     this.database.db
       .prepare(
@@ -281,13 +275,10 @@ export class StateStoreService {
 
 function mapManagedUser(row: ManagedUserRow): ManagedUserRecord {
   return {
-    assignmentKey: row.assignment_key,
+    assignmentId: row.assignment_id,
     encryptedCredential: row.encrypted_credential,
     protocol: row.protocol,
-    runtime: row.runtime,
-    runtimeUserHash: row.runtime_user_hash,
-    ipLimit: row.ip_limit,
-    trafficLimitBytes: row.traffic_limit_bytes,
+    runtimeUserId: row.runtime_user_id,
     syncedAt: row.synced_at
   }
 }

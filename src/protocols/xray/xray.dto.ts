@@ -5,16 +5,15 @@ import {
   IsFQDN,
   IsIn,
   IsInt,
-  IsNumberString,
-  IsObject,
   IsOptional,
   IsString,
   IsUrl,
+  IsUUID,
   Matches,
   Max,
   MaxLength,
-  MinLength,
   Min,
+  MinLength,
   ValidateNested
 } from 'class-validator'
 
@@ -25,7 +24,7 @@ export class NodeRequestDto {
   nodeId!: number
 }
 
-export class TrojanControlDto extends NodeRequestDto {
+export class ProtocolControlDto extends NodeRequestDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -46,33 +45,16 @@ export class TrojanControlDto extends NodeRequestDto {
 }
 
 export class NodeUserDto {
-  @IsString()
-  @Matches(/^[A-Za-z0-9_-]+$/)
-  @MaxLength(100)
-  assignmentKey!: string
+  @IsUUID()
+  assignmentId!: string
 
   @IsString()
   @MinLength(1)
   @MaxLength(256)
   credential!: string
-
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  @Max(2_147_483_647)
-  ipLimit!: number
-
-  @IsOptional()
-  @IsNumberString({ no_symbols: true })
-  @MaxLength(20)
-  trafficLimitBytes!: string | null
-
-  @IsOptional()
-  @IsObject()
-  connectionOptions?: Record<string, unknown> | null
 }
 
-export class TrojanUserSyncDto extends NodeRequestDto {
+export class ProtocolUserSyncDto extends NodeRequestDto {
   @IsArray()
   @ArrayMaxSize(10_000)
   @ValidateNested({ each: true })
@@ -80,7 +62,7 @@ export class TrojanUserSyncDto extends NodeRequestDto {
   users!: NodeUserDto[]
 }
 
-export class TrojanUserUpdateDto extends NodeRequestDto {
+export class ProtocolUserUpdateDto extends NodeRequestDto {
   @IsString()
   @IsIn(['add', 'delete'])
   action!: 'add' | 'delete'
@@ -95,8 +77,6 @@ export class TrojanUserUpdateDto extends NodeRequestDto {
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(10_000)
-  @IsString({ each: true })
-  @Matches(/^[A-Za-z0-9_-]+$/, { each: true })
-  @MaxLength(100, { each: true })
-  assignmentKeys?: string[]
+  @IsUUID(undefined, { each: true })
+  assignmentIds?: string[]
 }

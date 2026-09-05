@@ -22,17 +22,15 @@ test('SQLite state persists encrypted user mappings and monotonic report time', 
     assert.equal(vault.decrypt(encrypted), 'private-credential')
 
     state.upsertManagedUser({
-      assignmentKey: 'assignment_1',
+      assignmentId: '10c970c5-7fa4-4389-a12f-3f6802aeeb79',
       encryptedCredential: encrypted,
       protocol: 'trojan',
-      runtime: 'trojan-go',
-      runtimeUserHash: 'a'.repeat(56),
-      ipLimit: 2,
-      trafficLimitBytes: '9007199254740993',
+      runtimeUserId:
+        'trojan.10c970c5-7fa4-4389-a12f-3f6802aeeb79@eagleway.internal',
       syncedAt: '2026-09-04T00:00:00.000Z'
     })
-    const stored = state.findManagedUser('assignment_1')
-    assert.equal(stored?.trafficLimitBytes, '9007199254740993')
+    const stored = state.findManagedUser('10c970c5-7fa4-4389-a12f-3f6802aeeb79')
+    assert.equal(stored?.protocol, 'trojan')
     assert.equal(
       vault.decrypt(stored!.encryptedCredential),
       'private-credential'
@@ -58,14 +56,12 @@ function fixtureConfig(directory: string): AppConfig {
     centerApiUrl: null,
     reportIntervalSeconds: 300,
     reportingEnabled: false,
+    serverBandwidthMbps: 1000,
     stateDir: directory,
     stateKeyPath: join(directory, 'state.key'),
     logDir: join(directory, 'logs'),
-    trojanGoBinary: '/usr/local/bin/trojan-go',
-    trojanGoApiAddress: '127.0.0.1:10000',
-    trojanGoPolicyPath: join(directory, 'runtime-policy.json'),
-    trojanGoArchiveUrl: null,
-    trojanGoArchiveSha256: null,
+    xrayBinary: '/usr/local/bin/xray',
+    xrayApiAddress: '127.0.0.1:10000',
     acmeEmail: null,
     privilegedHelper: '/usr/local/libexec/eagleway-node-helper',
     operationTimeoutSeconds: 900

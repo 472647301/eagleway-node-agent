@@ -96,10 +96,10 @@
 
 ## 5. 用户同步
 
-- 中心发送 assignmentKey 和 credential，两者即使当前相同也保持独立字段。
+- 中心发送独立的 `assignmentId` 和 `credential`；前者是 UUID 标识，后者是协议秘密。
 - 全量同步发送该节点全部有效 assignment。
 - 没有 assignment 时也必须发送空数组，不能跳过请求。
-- Agent 返回的 hash 按 nodeId + assignmentKey 保存。
+- Agent 不返回运行时 hash；Xray email 映射只保存在 Agent 本地。
 - 单项 error 不得包含 credential。
 - 中心删除 assignment 与外部节点用户删除仍通过同一业务事务 + Outbox 完成。
 
@@ -116,24 +116,26 @@
 - 无匹配来源仍返回 204 的策略在运维文档中明确。
 - 中心不接受 Body 或路径中的 nodeId。
 - 继续使用 bigint 字符串和乱序快照保护。
-- 不增加 trafficLimitBytes 超额动作。
+- 不增加流量额度、IP 限制、实时速率或在线人数逻辑。
 
 ## 7. 配置字段
 
 Node.connectionOptions 第一阶段建议规范为：
 
-- port：Trojan 对外端口。
-- domain：Trojan 证书域名。
+- port：当前协议的对外端口；80 和 Agent 的 Xray API 端口保留，不可使用。
+- domain：Trojan、VLESS 或 VMess 的 TLS 证书域名。
 - proxyUrl：可选伪装站点上游。
 - 其余字段需要进入明确 DTO 后才能传给 Agent，禁止无限制透传任意系统配置。
 
 Node.apiEndpoint 是 Agent 控制 API 地址，与 Trojan 客户端连接地址不是同一概念。
 
+同一台 VPS 同时只运行一种协议；中心修改 `Node.protocol` 前必须先卸载旧协议并等待状态收敛为 `not_installed`。
+
 ## 8. 安全与日志
 
 - 中心 NodeClient 日志仅记录 endpoint origin，不记录完整 URL 查询参数。
 - 不记录请求 Body。
-- 不记录 assignmentKey、credential 和 connectionOptions。
+- 不记录 credential 和 connectionOptions。
 - 节点错误只保留白名单 errorCode 和安全 message。
 - IP 白名单变更应具备先验证新地址再撤销旧地址的运维流程。
 
@@ -147,4 +149,3 @@ Node.apiEndpoint 是 Agent 控制 API 地址，与 Trojan 客户端连接地址�
 - 空用户数组仍调用 users/sync。
 - 大整数流量不丢精度。
 - requiresUserSync 触发完整同步且不会并发重复执行。
-

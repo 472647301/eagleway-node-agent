@@ -8,18 +8,19 @@ readonly STATE_ROOT="/var/lib/eagleway-node-agent"
 readonly LOG_ROOT="/var/log/eagleway-node-agent"
 
 usage() {
-  echo "Usage: sudo $0 <source-directory> <node-id> <allowed-cidrs> [center-api-url] [port]" >&2
+  echo "Usage: sudo $0 <source-directory> <node-id> <allowed-cidrs> <bandwidth-mbps> [center-api-url] [port]" >&2
   exit 2
 }
 
 [[ "${EUID}" -eq 0 ]] || { echo "Bootstrap must run as root" >&2; exit 1; }
-[[ $# -ge 3 && $# -le 5 ]] || usage
+[[ $# -ge 4 && $# -le 6 ]] || usage
 
 SOURCE_DIR="$(realpath "$1")"
 NODE_ID="$2"
 ALLOWED_CIDRS="$3"
-CENTER_API_URL="${4:-}"
-AGENT_PORT="${5:-8086}"
+SERVER_BANDWIDTH_MBPS="$4"
+CENTER_API_URL="${5:-}"
+AGENT_PORT="${6:-8086}"
 
 [[ -f /etc/os-release ]] || { echo "Missing /etc/os-release" >&2; exit 1; }
 . /etc/os-release
@@ -29,6 +30,10 @@ AGENT_PORT="${5:-8086}"
   exit 1
 }
 [[ "${NODE_ID}" =~ ^[1-9][0-9]*$ ]] || { echo "node-id is invalid" >&2; exit 1; }
+[[ "${SERVER_BANDWIDTH_MBPS}" =~ ^[1-9][0-9]*$ ]] || {
+  echo "bandwidth-mbps is invalid" >&2
+  exit 1
+}
 [[ "${AGENT_PORT}" =~ ^[0-9]+$ ]] && (( AGENT_PORT >= 1 && AGENT_PORT <= 65535 )) || {
   echo "port is invalid" >&2
   exit 1
@@ -104,24 +109,18 @@ TRUST_PROXY=false
 CENTER_API_URL=${CENTER_API_URL}
 REPORT_INTERVAL_SECONDS=300
 REPORTING_ENABLED=$([[ -n "${CENTER_API_URL}" ]] && echo true || echo false)
+SERVER_BANDWIDTH_MBPS=${SERVER_BANDWIDTH_MBPS}
 STATE_DIR=${STATE_ROOT}
 STATE_KEY_PATH=${CONFIG_ROOT}/state.key
 LOG_DIR=${LOG_ROOT}
-TROJAN_GO_BINARY=/usr/local/bin/trojan-go
-TROJAN_GO_API_ADDRESS=127.0.0.1:10000
+XRAY_BINARY=/usr/local/bin/xray
+XRAY_API_ADDRESS=127.0.0.1:10000
 PRIVILEGED_HELPER=/usr/local/libexec/eagleway-node-helper
 OPERATION_TIMEOUT_SECONDS=900
-TROJAN_GO_POLICY_PATH=${CONFIG_ROOT}/runtime-policy.json
 ACME_EMAIL=
 EOF
 chown "root:${AGENT_USER}" "${CONFIG_ROOT}/agent.env"
 chmod 0640 "${CONFIG_ROOT}/agent.env"
-if [[ ! -f "${CONFIG_ROOT}/runtime-policy.json" ]]; then
-  printf '%s\n' '{"archiveUrl":null,"archiveSha256":null}' \
-    > "${CONFIG_ROOT}/runtime-policy.json"
-fi
-chown root:root "${CONFIG_ROOT}/runtime-policy.json"
-chmod 0644 "${CONFIG_ROOT}/runtime-policy.json"
 if [[ ! -f "${CONFIG_ROOT}/state.key" ]]; then
   dd if=/dev/urandom of="${CONFIG_ROOT}/state.key" bs=32 count=1 status=none
 fi
@@ -144,4 +143,3 @@ if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; the
 fi
 
 echo "Eagleway Node Agent installed in ${RELEASE_DIR}"
-echo "Set the pinned artifact URL and SHA-256 in ${CONFIG_ROOT}/runtime-policy.json before protocol installation."

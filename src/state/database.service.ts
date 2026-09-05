@@ -41,24 +41,21 @@ export class DatabaseService
   private migrate(): void {
     const db = this.db
     const version = db.pragma('user_version', { simple: true }) as number
-    if (version > 1) {
+    if (version > 2) {
       throw new Error(`Unsupported state database version: ${version}`)
     }
     if (version === 0) {
       db.transaction(() => {
         db.exec(`
           CREATE TABLE managed_users (
-            assignment_key TEXT PRIMARY KEY,
+            assignment_id TEXT PRIMARY KEY,
             encrypted_credential TEXT NOT NULL,
             protocol TEXT NOT NULL,
-            runtime TEXT NOT NULL,
-            runtime_user_hash TEXT NOT NULL,
-            ip_limit INTEGER NOT NULL CHECK (ip_limit >= 0),
-            traffic_limit_bytes TEXT NULL,
+            runtime_user_id TEXT NOT NULL,
             synced_at TEXT NOT NULL
           );
-          CREATE UNIQUE INDEX managed_users_runtime_hash
-            ON managed_users(protocol, runtime_user_hash);
+          CREATE UNIQUE INDEX managed_users_runtime_id
+            ON managed_users(protocol, runtime_user_id);
 
           CREATE TABLE operations (
             operation_id TEXT PRIMARY KEY,
@@ -102,7 +99,24 @@ export class DatabaseService
             updated_at TEXT NOT NULL
           );
         `)
-        db.pragma('user_version = 1')
+        db.pragma('user_version = 2')
+      })()
+    }
+    if (version === 1) {
+      db.transaction(() => {
+        db.exec(`
+          DROP TABLE managed_users;
+          CREATE TABLE managed_users (
+            assignment_id TEXT PRIMARY KEY,
+            encrypted_credential TEXT NOT NULL,
+            protocol TEXT NOT NULL,
+            runtime_user_id TEXT NOT NULL,
+            synced_at TEXT NOT NULL
+          );
+          CREATE UNIQUE INDEX managed_users_runtime_id
+            ON managed_users(protocol, runtime_user_id);
+        `)
+        db.pragma('user_version = 2')
       })()
     }
   }

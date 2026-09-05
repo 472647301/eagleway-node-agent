@@ -4,7 +4,7 @@ import { StateModule } from './state/state.module'
 import { OperationsModule } from './operations/operations.module'
 import { AgentConfigModule } from './config/config.module'
 import { HostModule } from './host/host.module'
-import { TrojanModule } from './protocols/trojan/trojan.module'
+import { XrayModule } from './protocols/xray/xray.module'
 import { ReportingModule } from './reporting/reporting.module'
 import { LogModule } from './logs/log.module'
 
@@ -14,7 +14,7 @@ import { LogModule } from './logs/log.module'
     StateModule,
     OperationsModule,
     HostModule,
-    TrojanModule,
+    XrayModule,
     ReportingModule,
     LogModule
   ],

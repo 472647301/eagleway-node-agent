@@ -7,9 +7,8 @@
 
 - 仓库名、npm 包基础名和进程名统一使用 `eagleway-node-agent`。
 - Agent 是通用节点控制代理，不以 Trojan 作为永久项目边界。
-- 第一阶段使用 `trojan-go` 实现 Trojan。
-- 后续 VLESS、VMess 等协议预计通过 `xray-core` 实现。
-- HTTP 路由中的协议名与具体运行时解耦；未来允许 Trojan 从 `trojan-go` 迁移到 Xray，而不改变中心侧协议路由。
+- 第一阶段同时实现 Trojan、VLESS、VMess，统一使用 `xray-core`。
+- HTTP 路由保持协议名，三个协议共享 Xray 生命周期、HandlerService 和 StatsService 适配层。
 
 ## 2. 兼容范围
 
@@ -74,16 +73,22 @@
 
 ## 10. 流量
 
-- Agent 上报累计上传/下载字节、当前速度、IP 限制和在线数。
+- Agent 上报累计上传/下载字节、显式配置的服务器带宽（Mbps）和 Xray 入站实际用户数。
 - 字节计数使用非负十进制字符串，避免 JavaScript 大整数精度损失。
+- 上报携带 systemd InvocationID；中心用它识别 Xray 重启造成的计数器归零。
 - 中心负责持久化日、月和总流量账本。
-- 第一阶段不进行任何流量超额删除、禁用或告警处理。
-- `trafficLimitBytes` 可以保存和透传，但不触发运行时动作。
+- 第一阶段不实现在线人数、IP 限制、实时速率或流量额度策略。
 
-## 11. 本地状态
+## 11. 用户标识与凭证
+
+- `assignmentId` 是稳定、非秘密的 UUID，用于中心、Agent 和流量快照关联。
+- `credential` 是独立秘密：Trojan 使用高熵随机串，VLESS/VMess 使用 UUID。
+- Xray email 使用 `{protocol}.{assignmentId}@eagleway.internal`，只作为运行时唯一标识和统计键。
+- 中心不保存 Xray 内部 hash；Agent 在 SQLite 中加密保存 credential。
+
+## 12. 本地状态
 
 - 使用 SQLite，不引入独立数据库服务。
 - 中心始终是事实源，SQLite 只保存可重建的节点本地状态。
 - SQLite 保存用户映射、操作状态、上报游标和 Agent 所拥有的系统资源清单。
 - 数据库损坏后允许重建，并通过中心全量同步恢复。
-

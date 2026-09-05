@@ -1,5 +1,4 @@
 import 'dotenv/config'
-import { existsSync, readFileSync } from 'node:fs'
 import { isIP } from 'node:net'
 import { resolve } from 'node:path'
 
@@ -13,14 +12,12 @@ export interface AppConfig {
   centerApiUrl: string | null
   reportIntervalSeconds: number
   reportingEnabled: boolean
+  serverBandwidthMbps: number
   stateDir: string
   stateKeyPath: string
   logDir: string
-  trojanGoBinary: string
-  trojanGoApiAddress: string
-  trojanGoPolicyPath: string
-  trojanGoArchiveUrl: string | null
-  trojanGoArchiveSha256: string | null
+  xrayBinary: string
+  xrayApiAddress: string
   acmeEmail: string | null
   privilegedHelper: string
   operationTimeoutSeconds: number
@@ -49,22 +46,6 @@ export function loadAppConfig(env = process.env): AppConfig {
   if (reportingEnabled && !centerApiUrl) {
     throw new Error('CENTER_API_URL is required when reporting is enabled')
   }
-  const trojanGoPolicyPath = resolve(
-    env.TROJAN_GO_POLICY_PATH ??
-      (runtimeEnv === 'production'
-        ? '/etc/eagleway-node-agent/runtime-policy.json'
-        : './runtime-policy.json')
-  )
-  const artifactPolicy = loadArtifactPolicy(
-    trojanGoPolicyPath,
-    runtimeEnv === 'production'
-      ? {}
-      : {
-          archiveUrl: env.TROJAN_GO_ARCHIVE_URL,
-          archiveSha256: env.TROJAN_GO_ARCHIVE_SHA256
-        }
-  )
-
   return {
     env: runtimeEnv,
     port: boundedInteger(env.PORT, 8086, 1, 65_535, 'PORT'),
@@ -81,6 +62,13 @@ export function loadAppConfig(env = process.env): AppConfig {
       'REPORT_INTERVAL_SECONDS'
     ),
     reportingEnabled,
+    serverBandwidthMbps: boundedInteger(
+      env.SERVER_BANDWIDTH_MBPS,
+      runtimeEnv === 'production' ? NaN : 1000,
+      1,
+      1_000_000,
+      'SERVER_BANDWIDTH_MBPS'
+    ),
     stateDir,
     stateKeyPath: resolve(
       env.STATE_KEY_PATH ??
@@ -94,17 +82,8 @@ export function loadAppConfig(env = process.env): AppConfig {
           ? '/var/log/eagleway-node-agent'
           : './var/logs')
     ),
-    trojanGoBinary: env.TROJAN_GO_BINARY?.trim() || '/usr/local/bin/trojan-go',
-    trojanGoApiAddress: env.TROJAN_GO_API_ADDRESS?.trim() || '127.0.0.1:10000',
-    trojanGoPolicyPath,
-    trojanGoArchiveUrl: optionalHttpsUrl(
-      artifactPolicy.archiveUrl,
-      'runtime policy archiveUrl'
-    ),
-    trojanGoArchiveSha256: optionalSha256(
-      artifactPolicy.archiveSha256,
-      'runtime policy archiveSha256'
-    ),
+    xrayBinary: env.XRAY_BINARY?.trim() || '/usr/local/bin/xray',
+    xrayApiAddress: xrayApiAddress(env.XRAY_API_ADDRESS),
     acmeEmail: env.ACME_EMAIL?.trim() || null,
     privilegedHelper:
       env.PRIVILEGED_HELPER?.trim() ||
@@ -116,70 +95,6 @@ export function loadAppConfig(env = process.env): AppConfig {
       3600,
       'OPERATION_TIMEOUT_SECONDS'
     )
-  }
-}
-
-function optionalHttpsUrl(
-  value: string | undefined,
-  name: string
-): string | null {
-  if (!value?.trim()) return null
-  const url = new URL(value)
-  if (url.protocol !== 'https:' || url.username || url.password) {
-    throw new Error(`${name} must be an HTTPS URL without credentials`)
-  }
-  return url.toString()
-}
-
-function optionalSha256(
-  value: string | undefined,
-  name = 'TROJAN_GO_ARCHIVE_SHA256'
-): string | null {
-  if (!value?.trim()) return null
-  const normalized = value.trim().toLowerCase()
-  if (!/^[a-f0-9]{64}$/.test(normalized)) {
-    throw new Error(`${name} must be 64 hexadecimal characters`)
-  }
-  return normalized
-}
-
-function loadArtifactPolicy(
-  path: string,
-  fallback: { archiveUrl?: string; archiveSha256?: string }
-): { archiveUrl?: string; archiveSha256?: string } {
-  if (!existsSync(path)) return fallback
-  let value: unknown
-  try {
-    value = JSON.parse(readFileSync(path, 'utf8'))
-  } catch {
-    throw new Error('Trojan-Go runtime policy is not valid JSON')
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('Trojan-Go runtime policy must be an object')
-  }
-  const policy = value as Record<string, unknown>
-  const allowed = new Set(['archiveUrl', 'archiveSha256'])
-  if (Object.keys(policy).some((key) => !allowed.has(key))) {
-    throw new Error('Trojan-Go runtime policy contains unknown fields')
-  }
-  for (const key of allowed) {
-    if (
-      policy[key] !== undefined &&
-      policy[key] !== null &&
-      typeof policy[key] !== 'string'
-    ) {
-      throw new Error(
-        `Trojan-Go runtime policy ${key} must be a string or null`
-      )
-    }
-  }
-  return {
-    archiveUrl:
-      typeof policy.archiveUrl === 'string' ? policy.archiveUrl : undefined,
-    archiveSha256:
-      typeof policy.archiveSha256 === 'string'
-        ? policy.archiveSha256
-        : undefined
   }
 }
 
@@ -199,13 +114,26 @@ function boundedInteger(
   maximum: number,
   name: string
 ): number {
-  if (value == null || value === '') return fallback
+  if (value == null || value === '') {
+    if (Number.isNaN(fallback)) throw new Error(`${name} is required`)
+    return fallback
+  }
   if (!/^\d+$/.test(value)) throw new Error(`${name} must be an integer`)
   const parsed = Number(value)
   if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
     throw new Error(`${name} must be between ${minimum} and ${maximum}`)
   }
   return parsed
+}
+
+function xrayApiAddress(value: string | undefined): string {
+  const address = value?.trim() || '127.0.0.1:10000'
+  const match = /^127\.0\.0\.1:([1-9]\d{0,4})$/.exec(address)
+  const port = Number(match?.[1])
+  if (!match || port > 65_535) {
+    throw new Error('XRAY_API_ADDRESS must bind an IPv4 loopback port')
+  }
+  return address
 }
 
 function booleanValue(value: string | undefined, fallback: boolean): boolean {

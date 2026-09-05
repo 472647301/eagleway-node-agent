@@ -74,7 +74,7 @@
 }
 ```
 
-第一阶段 `{protocol}` 只接受 `trojan`。
+第一阶段 `{protocol}` 接受 `trojan`、`vless`、`vmess`。一台 VPS 同时只安装其中一个协议，但三者统一由 Xray-core 提供。
 
 处理顺序：
 
@@ -129,11 +129,8 @@
   "nodeId": 12,
   "users": [
     {
-      "assignmentKey": "assignment-key",
-      "credential": "credential",
-      "ipLimit": 2,
-      "trafficLimitBytes": "107374182400",
-      "connectionOptions": {}
+      "assignmentId": "10c970c5-7fa4-4389-a12f-3f6802aeeb79",
+      "credential": "credential"
     }
   ]
 }
@@ -143,10 +140,9 @@
 
 - users 是完整期望集合。
 - 本地缺失用户必须创建。
-- 已存在用户必须更新限制和映射。
+- 已存在且凭证不变的用户保持原累计计数；凭证变化时替换该运行时用户。
 - 本地多余用户必须删除。
 - 空数组必须删除全部协议用户，包括安装 bootstrap 用户。
-- `trafficLimitBytes` 第一阶段不执行额度限制。
 
 响应：
 
@@ -155,8 +151,7 @@
   "code": 0,
   "data": [
     {
-      "assignmentKey": "assignment-key",
-      "hash": "runtime-user-hash"
+      "assignmentId": "10c970c5-7fa4-4389-a12f-3f6802aeeb79"
     }
   ]
 }
@@ -174,11 +169,8 @@
   "action": "add",
   "users": [
     {
-      "assignmentKey": "assignment-key",
-      "credential": "credential",
-      "ipLimit": 2,
-      "trafficLimitBytes": null,
-      "connectionOptions": {}
+      "assignmentId": "10c970c5-7fa4-4389-a12f-3f6802aeeb79",
+      "credential": "credential"
     }
   ]
 }
@@ -194,7 +186,7 @@ add 表示 upsert。重复请求不得创建重复运行时用户。
 {
   "nodeId": 12,
   "action": "delete",
-  "assignmentKeys": ["assignment-key"]
+  "assignmentIds": ["10c970c5-7fa4-4389-a12f-3f6802aeeb79"]
 }
 ```
 
@@ -220,7 +212,7 @@ add 表示 upsert。重复请求不得创建重复运行时用户。
   "data": {
     "nodeId": 12,
     "protocol": "trojan",
-    "runtime": "trojan-go",
+    "runtime": "xray-core",
     "runtimeVersion": "pinned-version",
     "state": "installing",
     "startedAt": null,
@@ -255,21 +247,23 @@ Agent 不返回 offline。中心请求超时或连接失败时，由中心将节
 ```json
 {
   "reportedAt": "2026-09-04T01:05:00.000Z",
-  "online": 2,
+  "runtimeEpoch": "6f01dc9dc1294fd3a463f521cb24f1ee",
+  "bandwidthMbps": 1000,
+  "managedUserCount": 2,
   "users": [
     {
-      "assignmentKey": "assignment-key",
+      "assignmentId": "10c970c5-7fa4-4389-a12f-3f6802aeeb79",
       "uploadBytes": "1024",
-      "downloadBytes": "2048",
-      "uploadSpeedBytes": 128,
-      "downloadSpeedBytes": 256,
-      "ipLimit": 2
+      "downloadBytes": "2048"
     }
   ]
 }
 ```
 
-online 必须表示实际在线连接/客户端语义，不能简单使用已配置用户数量。若 trojan-go 无法提供可靠在线数，返回经过明确验证的近似值并在实现文档中注明，不能静默伪造。
+- `runtimeEpoch` 是 `eagleway-xray.service` 的 systemd InvocationID。
+- `bandwidthMbps` 是 VPS 本机显式配置的线路带宽，不由中心后台填写。
+- `managedUserCount` 是 Xray HandlerService 返回的目标入站实际用户条目数，不是中心数据库计数，也不是在线连接数。
+- `users` 只包含 email 符合受管格式且能严格解析出 UUID assignmentId 的实际运行时用户。
 
 ## 8. 日志接口
 
@@ -306,7 +300,7 @@ Agent 调用：
 
 `POST {CENTER_API}/api/v1/node/traffic-report`
 
-Body 与流量查询 data 一致，但不包含 nodeId。中心反向代理覆盖来源 IP Header，并按 `nodes.reportSourceIp` 匹配节点。
+Body 与流量查询 data 一致，但不包含 nodeId。中心反向代理覆盖来源 IP Header，并按 `nodes.reportSourceIp` 匹配节点。中心仅通过该接口写入服务器带宽、运行时用户数和流量快照。
 
 上报规则：
 
@@ -332,4 +326,3 @@ Body 与流量查询 data 一致，但不包含 nodeId。中心反向代理覆�
 - Agent 是否有权调用受限 helper。
 
 任何一项失败都不得创建或覆盖运行时配置。
-

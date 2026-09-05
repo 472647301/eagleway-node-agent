@@ -3,7 +3,7 @@ import { APP_CONFIG, type AppConfig } from '@/config/app-config'
 import { ProcessRunnerService } from './process-runner.service'
 
 export type HelperAction =
-  'trojan-install' | 'trojan-uninstall' | 'trojan-start' | 'trojan-stop'
+  'xray-install' | 'xray-uninstall' | 'xray-start' | 'xray-stop'
 
 @Injectable()
 export class PrivilegedHelperService {

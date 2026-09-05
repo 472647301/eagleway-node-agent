@@ -14,7 +14,6 @@ import {
   realpathSync,
   renameSync,
   rmSync,
-  statSync,
   unlinkSync,
   writeFileSync
 } from 'node:fs'
@@ -24,29 +23,38 @@ import { spawnSync, type SpawnSyncReturns } from 'node:child_process'
 const stateDir = resolve(
   process.env.STATE_DIR || '/var/lib/eagleway-node-agent'
 )
-const runtimeDir = '/etc/eagleway-node-agent/runtimes/trojan-go'
-const runtimeBinary = '/usr/local/bin/trojan-go'
-const unitPath = '/etc/systemd/system/eagleway-trojan.service'
+const runtimeDir = '/etc/eagleway-node-agent/runtimes/xray'
+const runtimeBinary = '/usr/local/bin/xray'
+const unitPath = '/etc/systemd/system/eagleway-xray.service'
 const runtimeMarker = join(runtimeDir, '.managed-by-eagleway-node-agent')
-const runtimeMarkerValue = 'eagleway-node-agent:trojan-go:v1\n'
-const runtimePolicyPath = '/etc/eagleway-node-agent/runtime-policy.json'
+const runtimeMarkerValue = 'eagleway-node-agent:xray:v1\n'
 const nginxMarker = '# Managed by eagleway-node-agent\n'
+const xrayRelease = {
+  version: 'v26.3.27',
+  assets: {
+    x64: {
+      fileName: 'Xray-linux-64.zip',
+      sha256: '23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae'
+    },
+    arm64: {
+      fileName: 'Xray-linux-arm64-v8a.zip',
+      sha256: '4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c'
+    }
+  }
+} as const
 
 type InstallPlan = {
   schemaVersion: 1
   action: 'install'
   nodeId: number
+  protocol: 'trojan' | 'vless' | 'vmess'
   hostProfile: 'ubuntu' | 'ubuntu-baota'
-  architecture: string
+  architecture: keyof typeof xrayRelease.assets
   port: number
   domain: string
   proxyUrl: string | null
+  apiAddress: string
   acmeEmail: string | null
-}
-
-type RuntimePolicy = {
-  archiveUrl: string
-  archiveSha256: string
 }
 
 async function main(): Promise<void> {
@@ -56,21 +64,21 @@ async function main(): Promise<void> {
   const [action, argument, extra] = process.argv.slice(2)
   if (extra) fail('Too many arguments')
   switch (action) {
-    case 'trojan-install':
+    case 'xray-install':
       if (!argument) fail('Install plan is required')
       await install(readPlan(argument))
       break
-    case 'trojan-uninstall':
+    case 'xray-uninstall':
       assertNoArgument(argument)
       uninstall()
       break
-    case 'trojan-start':
+    case 'xray-start':
       assertNoArgument(argument)
-      systemctl('start', 'eagleway-trojan.service')
+      systemctl('start', 'eagleway-xray.service')
       break
-    case 'trojan-stop':
+    case 'xray-stop':
       assertNoArgument(argument)
-      systemctl('stop', 'eagleway-trojan.service')
+      systemctl('stop', 'eagleway-xray.service')
       break
     default:
       fail('Unsupported helper action')
@@ -80,59 +88,48 @@ async function main(): Promise<void> {
 async function install(plan: InstallPlan): Promise<void> {
   assertUbuntu()
   assertManagedResourceBoundary()
-  const policy = readRuntimePolicy()
+  const artifact = xrayArtifact(plan.architecture)
   mkdirSync(runtimeDir, { recursive: true, mode: 0o700 })
   atomicWrite(runtimeMarker, runtimeMarkerValue, 0o600)
   mkdirSync(join(stateDir, 'artifacts'), { recursive: true, mode: 0o700 })
   mkdirSync(join(stateDir, 'extract'), { recursive: true, mode: 0o700 })
-  const archivePath = join(
-    stateDir,
-    'artifacts',
-    `trojan-go-${policy.archiveSha256}.zip`
-  )
-  if (
-    !existsSync(archivePath) ||
-    sha256(archivePath) !== policy.archiveSha256
-  ) {
-    await download(policy.archiveUrl, archivePath, policy.archiveSha256)
+  const archivePath = join(stateDir, 'artifacts', artifact.cacheName)
+  if (!existsSync(archivePath) || sha256(archivePath) !== artifact.sha256) {
+    await download(artifact.url, archivePath, artifact.sha256)
   }
-  const extractDir = join(stateDir, 'extract', policy.archiveSha256)
+  const extractDir = join(stateDir, 'extract', artifact.sha256)
   rmSync(extractDir, { recursive: true, force: true })
   mkdirSync(extractDir, { recursive: true, mode: 0o700 })
-  run('/usr/bin/unzip', [
-    '-j',
-    '-o',
-    archivePath,
-    '*/trojan-go',
-    '-d',
-    extractDir
-  ])
-  let extracted = join(extractDir, 'trojan-go')
+  run(
+    '/usr/bin/unzip',
+    ['-j', '-o', archivePath, '*/xray', '-d', extractDir],
+    false
+  )
+  const extracted = join(extractDir, 'xray')
   if (!existsSync(extracted)) {
-    run('/usr/bin/unzip', [
-      '-j',
-      '-o',
-      archivePath,
-      'trojan-go',
-      '-d',
-      extractDir
-    ])
+    run('/usr/bin/unzip', ['-j', '-o', archivePath, 'xray', '-d', extractDir])
   }
-  if (!existsSync(extracted))
-    fail('Trojan-Go archive does not contain trojan-go')
+  if (!existsSync(extracted)) fail('Xray archive does not contain xray')
   copyFileSync(extracted, runtimeBinary)
   chmodSync(runtimeBinary, 0o755)
 
   const certificate = ensureCertificate(plan)
   atomicWrite(
     join(runtimeDir, 'config.json'),
-    `${JSON.stringify(trojanConfig(plan, certificate), null, 2)}\n`,
+    `${JSON.stringify(xrayConfig(plan, certificate), null, 2)}\n`,
     0o600
   )
+  run(runtimeBinary, [
+    'run',
+    '-test',
+    '-config',
+    join(runtimeDir, 'config.json')
+  ])
   atomicWrite(unitPath, systemdUnit(), 0o644)
   systemctl('daemon-reload')
-  systemctl('enable', 'eagleway-trojan.service')
-  systemctl('restart', 'eagleway-trojan.service')
+  systemctl('enable', 'eagleway-xray.service')
+  systemctl('restart', 'eagleway-xray.service')
+  run('/usr/bin/systemctl', ['is-active', '--quiet', 'eagleway-xray.service'])
   rmSync(extractDir, { recursive: true, force: true })
 }
 
@@ -140,7 +137,7 @@ function uninstall(): void {
   if (!isManagedRuntime()) return
   run(
     '/usr/bin/systemctl',
-    ['disable', '--now', 'eagleway-trojan.service'],
+    ['disable', '--now', 'eagleway-xray.service'],
     false
   )
   safeRemove(unitPath)
@@ -250,45 +247,69 @@ ${upstream}
 `
 }
 
-function trojanConfig(
+function xrayConfig(
   plan: InstallPlan,
   certificate: { cert: string; key: string }
 ) {
+  const settings: Record<string, unknown> =
+    plan.protocol === 'trojan'
+      ? { users: [], fallbacks: [{ dest: 80 }] }
+      : plan.protocol === 'vless'
+        ? { clients: [], decryption: 'none', fallbacks: [{ dest: 80 }] }
+        : { clients: [] }
   return {
-    run_type: 'server',
-    local_addr: '::',
-    local_port: plan.port,
-    remote_addr: '127.0.0.1',
-    remote_port: 80,
-    password: [],
-    ssl: {
-      cert: certificate.cert,
-      key: certificate.key,
-      sni: plan.domain,
-      alpn: ['http/1.1'],
-      session_ticket: true,
-      reuse_session: true,
-      fallback_addr: '127.0.0.1',
-      fallback_port: 80
+    log: {
+      access: '/var/log/eagleway-node-agent/xray-access.log',
+      error: '/var/log/eagleway-node-agent/xray-error.log',
+      loglevel: 'warning'
     },
-    tcp: { no_delay: true, keep_alive: true, prefer_ipv4: false },
-    mux: { enabled: false, concurrency: 8, idle_timeout: 60 },
-    websocket: { enabled: false, path: '', host: plan.domain },
-    api: { enabled: true, api_addr: '127.0.0.1', api_port: 10000 },
-    log_level: 2,
-    log_file: '/var/log/eagleway-node-agent/trojan-go.log'
+    api: {
+      tag: 'api',
+      listen: plan.apiAddress,
+      services: ['HandlerService', 'StatsService']
+    },
+    stats: {},
+    policy: {
+      levels: {
+        '0': { statsUserUplink: true, statsUserDownlink: true }
+      }
+    },
+    inbounds: [
+      {
+        tag: `eagleway-${plan.protocol}`,
+        listen: '::',
+        port: plan.port,
+        protocol: plan.protocol,
+        settings,
+        streamSettings: {
+          network: 'tcp',
+          security: 'tls',
+          tlsSettings: {
+            serverName: plan.domain,
+            alpn: ['http/1.1'],
+            certificates: [
+              {
+                certificateFile: certificate.cert,
+                keyFile: certificate.key
+              }
+            ]
+          }
+        }
+      }
+    ],
+    outbounds: [{ tag: 'direct', protocol: 'freedom' }]
   }
 }
 
 function systemdUnit(): string {
   return `[Unit]
-Description=Eagleway Trojan-Go Runtime
+Description=Eagleway Xray Runtime
 After=network-online.target nginx.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/trojan-go -config /etc/eagleway-node-agent/runtimes/trojan-go/config.json
+ExecStart=/usr/local/bin/xray run -config /etc/eagleway-node-agent/runtimes/xray/config.json
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
@@ -324,11 +345,13 @@ function readPlan(path: string): InstallPlan {
     'schemaVersion',
     'action',
     'nodeId',
+    'protocol',
     'hostProfile',
     'architecture',
     'port',
     'domain',
     'proxyUrl',
+    'apiAddress',
     'acmeEmail'
   ])
   if (Object.keys(value).some((key) => !allowedKeys.has(key)))
@@ -337,6 +360,8 @@ function readPlan(path: string): InstallPlan {
     fail('Install plan version is invalid')
   if (!Number.isSafeInteger(value.nodeId) || Number(value.nodeId) <= 0)
     fail('nodeId is invalid')
+  if (!['trojan', 'vless', 'vmess'].includes(String(value.protocol)))
+    fail('Protocol is invalid')
   if (!['ubuntu', 'ubuntu-baota'].includes(String(value.hostProfile)))
     fail('Host profile is invalid')
   if (!['x64', 'arm64'].includes(String(value.architecture)))
@@ -352,6 +377,12 @@ function readPlan(path: string): InstallPlan {
   if (typeof value.domain !== 'string' || !validDomain(value.domain))
     fail('Domain is invalid')
   if (value.proxyUrl !== null) validateProxyUrl(value.proxyUrl)
+  if (
+    typeof value.apiAddress !== 'string' ||
+    !/^127\.0\.0\.1:(?:[1-9]\d{0,4})$/.test(value.apiAddress) ||
+    Number(value.apiAddress.split(':')[1]) > 65_535
+  )
+    fail('Xray API address is invalid')
   if (
     value.acmeEmail !== null &&
     (typeof value.acmeEmail !== 'string' ||
@@ -448,37 +479,12 @@ function validateProxyUrl(value: unknown): void {
     fail('Proxy URL is invalid')
 }
 
-function readRuntimePolicy(): RuntimePolicy {
-  const metadata = statSync(runtimePolicyPath)
-  if (metadata.uid !== 0 || (metadata.mode & 0o022) !== 0) {
-    fail('Runtime policy ownership or permissions are unsafe')
-  }
-  const value = JSON.parse(readFileSync(runtimePolicyPath, 'utf8')) as Record<
-    string,
-    unknown
-  >
-  const allowed = new Set(['archiveUrl', 'archiveSha256'])
-  if (
-    !value ||
-    Array.isArray(value) ||
-    Object.keys(value).some((key) => !allowed.has(key)) ||
-    typeof value.archiveUrl !== 'string' ||
-    typeof value.archiveSha256 !== 'string'
-  ) {
-    fail('Runtime policy is invalid')
-  }
-  const archive = new URL(value.archiveUrl)
-  if (
-    archive.protocol !== 'https:' ||
-    archive.username ||
-    archive.password ||
-    !/^[a-f0-9]{64}$/.test(value.archiveSha256)
-  ) {
-    fail('Runtime policy is invalid')
-  }
+function xrayArtifact(architecture: InstallPlan['architecture']) {
+  const asset = xrayRelease.assets[architecture]
   return {
-    archiveUrl: archive.toString(),
-    archiveSha256: value.archiveSha256
+    url: `https://github.com/XTLS/Xray-core/releases/download/${xrayRelease.version}/${asset.fileName}`,
+    sha256: asset.sha256,
+    cacheName: `xray-${xrayRelease.version}-${architecture}-${asset.sha256}.zip`
   }
 }
 
@@ -489,7 +495,7 @@ function assertManagedResourceBoundary(): void {
     existsSync(runtimeBinary) ||
     existsSync(unitPath)
   ) {
-    fail('Existing Trojan-Go resources are not owned by Eagleway')
+    fail('Existing Xray resources are not owned by Eagleway')
   }
 }
 

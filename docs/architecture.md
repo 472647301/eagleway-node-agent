@@ -14,7 +14,7 @@ Eagleway Node Agent 在一台 VPS 上只运行一个实例，承担中心控制�
 - 在进程重启后恢复未完成操作和用户映射。
 - 定期向中心上报可信、不会丢失整数精度的累计流量快照。
 - 支持普通 Ubuntu 和 Ubuntu 宝塔两种主机环境。
-- 为未来接入 Xray 留出边界，但不提前实现未使用协议。
+- 第一阶段以一套 Xray 适配器实现 Trojan、VLESS、VMess。
 
 ## 2. 非目标
 
@@ -36,7 +36,7 @@ Eagleway Network API
   ▼
 Eagleway Node Agent
   ├─ Host Adapter ─────── systemd / PM2 / Nginx / 宝塔 / ACME
-  ├─ Runtime Adapter ──── trojan-go（第一阶段）
+  ├─ Runtime Adapter ──── Xray-core（Trojan / VLESS / VMess）
   ├─ State Store ──────── SQLite
   └─ Reporter ─────────── traffic-report → Network API
 ```
@@ -57,10 +57,10 @@ src/
 ├─ operations/                 安装/卸载任务、幂等和恢复
 ├─ protocols/
 │  ├─ protocol-registry        protocol → runtime 映射
-│  └─ trojan/                  Trojan 应用用例
+│  └─ xray/                    三协议应用用例与 protobuf API 适配
 ├─ runtimes/
 │  ├─ runtime-driver           运行时统一能力边界
-│  └─ trojan-go/               trojan-go CLI/API、配置和状态解析
+│  └─ xray/                    Xray HandlerService / StatsService
 ├─ host/
 │  ├─ host-inspector           OS、端口和能力探测
 │  ├─ ubuntu/                  普通 Ubuntu 适配
@@ -80,12 +80,11 @@ Controller 只负责路由、DTO、节点 ID 校验和返回状态；操作编�
 
 | 协议 | 第一阶段运行时 | 未来可能运行时 |
 |---|---|---|
-| trojan | trojan-go | xray-core |
-| vless | 未实现 | xray-core |
-| vmess | 未实现 | xray-core |
-| shadowsocks | 未实现 | xray-core |
+| trojan | xray-core | - |
+| vless | xray-core | - |
+| vmess | xray-core | - |
 
-协议层定义中心可理解的用户、状态和流量模型；运行时层负责把这些模型转换成 trojan-go 或 Xray 的配置/API。中心不感知运行时名称。
+协议层定义中心可理解的用户、状态和流量模型；运行时层负责把这些模型转换成 Xray 配置和 gRPC API。中心不依赖 Xray 的内部 protobuf 类型。
 
 ## 6. 操作模型
 
@@ -124,17 +123,13 @@ SQLite 文件建议位于 `/var/lib/eagleway-node-agent/state.db`。
 
 保存中心 assignment 与运行时用户的映射：
 
-- assignment_key
+- assignment_id
 - encrypted_credential
 - protocol
-- runtime
-- runtime_user_hash
-- ip_limit
-- traffic_limit_bytes
-- desired_generation
+- runtime_user_id
 - synced_at
 
-assignmentKey 和 credential 都视为秘密。credential 使用应用层 AES-GCM 加密，密钥位于独立的 `/etc/eagleway-node-agent/state.key`。
+`assignmentId` 是非秘密 UUID；credential 使用应用层 AES-GCM 加密，密钥位于独立的 `/etc/eagleway-node-agent/state.key`。
 
 ### operations
 
@@ -204,7 +199,7 @@ CentOS/RHEL 或未知系统返回 `UNSUPPORTED_OS`，不得继续执行包安装
 - 不提供任意命令、任意文件读取或任意路径参数。
 - 进程调用使用 executable + args，不经过 shell 字符串拼接。
 - 提权 helper 只接受固定动作和经过校验的参数。
-- 日志清洗 credential、assignmentKey、私钥、Authorization、Cookie 和 connectionOptions。
+- 日志清洗 credential、私钥、Authorization、Cookie 和 connectionOptions。
 - 日志文件读取必须同时检查 basename、真实路径边界和允许扩展名。
 - HTTP 请求正文不得直接写入访问日志。
 
@@ -225,13 +220,15 @@ Agent 可返回：
 
 ## 11. 流量模型
 
-- Agent 采集每个运行时用户的累计上传、累计下载和当前速度。
-- 通过 SQLite 将 runtime hash 映射回 assignmentKey。
+- Agent 采集每个运行时用户的累计上传和累计下载。
+- 从受管 Xray email 的固定格式直接解析 assignmentId；SQLite 只负责持久化可恢复的凭据和同步状态。
 - 所有字节累计值序列化为非负十进制字符串。
 - reportedAt 使用 UTC ISO 8601，并保证相对本 Agent 上次上报单调递增。
+- runtimeEpoch 使用 systemd InvocationID，中心据此识别整个 Xray 进程的计数器重置。
+- `bandwidthMbps` 来自 VPS 的 `SERVER_BANDWIDTH_MBPS`，不使用网卡协商速率或测速结果猜测。
+- `managedUserCount` 来自 Xray HandlerService 当前入站用户列表。
 - 上报失败指数退避，不修改累计计数器。
 - 中心以来源 IP 匹配节点，Body 不包含 nodeId。
-- 第一阶段不根据 trafficLimitBytes 执行任何动作。
 
 ## 12. 可观测性
 
@@ -248,4 +245,3 @@ Agent 可返回：
 - errorCode
 
 禁止包含用户秘密。安装输出应保存为受限操作日志，并通过日志 API 只返回清洗后的内容。
-

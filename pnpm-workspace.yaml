@@ -6,3 +6,4 @@ onlyBuiltDependencies:
 allowBuilds:
   '@scarf/scarf': false
   better-sqlite3: true
+  protobufjs: false

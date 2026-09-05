@@ -30,8 +30,7 @@ test('status API enforces node identity and the frozen response envelope', async
     ALLOWED_CIDRS: '127.0.0.1/32,::1/128',
     STATE_DIR: directory,
     STATE_KEY_PATH: join(directory, 'state.key'),
-    LOG_DIR: logDirectory,
-    TROJAN_GO_POLICY_PATH: join(directory, 'runtime-policy.json')
+    LOG_DIR: logDirectory
   })
 
   const module = await Test.createTestingModule({
@@ -50,25 +49,27 @@ test('status API enforces node identity and the frozen response envelope', async
 
   try {
     await app.init()
-    const response = await request(app.getHttpServer())
-      .post('/api/trojan/status')
-      .send({ nodeId: 42 })
-      .expect(200)
-    assert.equal(response.body.code, 0)
-    assert.deepEqual(
-      {
-        nodeId: response.body.data.nodeId,
-        protocol: response.body.data.protocol,
-        runtime: response.body.data.runtime,
-        state: response.body.data.state
-      },
-      {
-        nodeId: 42,
-        protocol: 'trojan',
-        runtime: 'trojan-go',
-        state: 'not_installed'
-      }
-    )
+    for (const protocol of ['trojan', 'vless', 'vmess']) {
+      const response = await request(app.getHttpServer())
+        .post(`/api/${protocol}/status`)
+        .send({ nodeId: 42 })
+        .expect(200)
+      assert.equal(response.body.code, 0)
+      assert.deepEqual(
+        {
+          nodeId: response.body.data.nodeId,
+          protocol: response.body.data.protocol,
+          runtime: response.body.data.runtime,
+          state: response.body.data.state
+        },
+        {
+          nodeId: 42,
+          protocol,
+          runtime: 'xray-core',
+          state: 'not_installed'
+        }
+      )
+    }
 
     const rejected = await request(app.getHttpServer())
       .post('/api/trojan/status')

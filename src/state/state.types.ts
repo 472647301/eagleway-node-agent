@@ -2,13 +2,10 @@ export type OperationType = 'install' | 'uninstall'
 export type OperationState = 'pending' | 'running' | 'succeeded' | 'failed'
 
 export interface ManagedUserRecord {
-  assignmentKey: string
+  assignmentId: string
   encryptedCredential: string
   protocol: string
-  runtime: string
-  runtimeUserHash: string
-  ipLimit: number
-  trafficLimitBytes: string | null
+  runtimeUserId: string
   syncedAt: string
 }
 

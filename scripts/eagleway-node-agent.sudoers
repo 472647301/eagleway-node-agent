@@ -1,1 +1,1 @@
-eagleway-agent ALL=(root) NOPASSWD: /usr/local/libexec/eagleway-node-helper trojan-install *, /usr/local/libexec/eagleway-node-helper trojan-uninstall, /usr/local/libexec/eagleway-node-helper trojan-start, /usr/local/libexec/eagleway-node-helper trojan-stop
+eagleway-agent ALL=(root) NOPASSWD: /usr/local/libexec/eagleway-node-helper xray-install *, /usr/local/libexec/eagleway-node-helper xray-uninstall, /usr/local/libexec/eagleway-node-helper xray-start, /usr/local/libexec/eagleway-node-helper xray-stop

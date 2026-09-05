@@ -7,8 +7,8 @@ import {
 } from '@nestjs/common'
 import { APP_CONFIG, type AppConfig } from '@/config/app-config'
 import { StateStoreService } from '@/state/state-store.service'
-import { TrojanAssignmentsService } from '@/protocols/trojan/trojan-assignments.service'
-import { TrojanGoClient } from '@/protocols/trojan/trojan-go.client'
+import { XrayClient } from '@/protocols/xray/xray.client'
+import { XrayService } from '@/protocols/xray/xray.service'
 
 @Injectable()
 export class TrafficReporterService
@@ -23,8 +23,8 @@ export class TrafficReporterService
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly state: StateStoreService,
-    private readonly assignments: TrojanAssignmentsService,
-    private readonly client: TrojanGoClient
+    private readonly xray: XrayService,
+    private readonly client: XrayClient
   ) {}
 
   onApplicationBootstrap(): void {
@@ -56,8 +56,9 @@ export class TrafficReporterService
     this.running = true
     try {
       if (!(await this.client.isActive())) return
-      const reportedAt = this.state.nextReportedAt()
-      const report = await this.assignments.traffic(reportedAt)
+      const protocol = this.xray.getInstalledProtocol()
+      if (!protocol) return
+      const report = await this.xray.trafficReport(protocol)
       const response = await fetch(
         `${this.config.centerApiUrl}/api/v1/node/traffic-report`,
         {
@@ -73,10 +74,10 @@ export class TrafficReporterService
       }
       this.consecutiveFailures = 0
       this.nextAllowedAt = 0
-      this.state.markReportSuccess(reportedAt)
+      this.state.markReportSuccess(report.reportedAt)
       this.logger.log({
         event: 'traffic.report_succeeded',
-        reportedAt,
+        reportedAt: report.reportedAt,
         users: report.users.length
       })
     } catch (error) {
