@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable } from '@nestjs/common'
+import { HttpStatus, Injectable, Logger } from '@nestjs/common'
 import { promises as dns } from 'node:dns'
 import { existsSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:net'
@@ -16,6 +16,8 @@ export interface HostInspection {
 
 @Injectable()
 export class HostInspectorService {
+  private readonly logger = new Logger(HostInspectorService.name)
+
   inspect(): HostInspection {
     if (process.platform !== 'linux') {
       throw new AgentError(
@@ -71,10 +73,25 @@ export class HostInspectorService {
   }
 
   async assertPortAvailable(port: number): Promise<void> {
-    if (!(await portAvailable(port))) {
+    let available: boolean
+    try {
+      available = await portAvailable(port)
+    } catch (error) {
+      this.logger.error({
+        event: 'host.port_probe_failed',
+        port,
+        errorCode: systemErrorCode(error)
+      })
+      throw new AgentError(
+        'OPERATION_FAILED',
+        'Requested protocol port could not be checked',
+        HttpStatus.INTERNAL_SERVER_ERROR
+      )
+    }
+    if (!available) {
       throw new AgentError(
         'PORT_IN_USE',
-        'Requested protocol port is already in use',
+        `Port ${port} is already in use`,
         HttpStatus.CONFLICT
       )
     }
@@ -113,13 +130,39 @@ export function parseOsRelease(value: string): Record<string, string> {
   return result
 }
 
-function portAvailable(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
+export async function portAvailable(port: number): Promise<boolean> {
+  const attempts = 3
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await probePort(port)
+      return true
+    } catch (error) {
+      if (systemErrorCode(error) !== 'EADDRINUSE') throw error
+      if (attempt === attempts) return false
+      await delay(100)
+    }
+  }
+  return false
+}
+
+function probePort(port: number): Promise<void> {
+  return new Promise((resolve, reject) => {
     const server = createServer()
     server.unref()
-    server.once('error', () => resolve(false))
+    server.once('error', reject)
     server.listen({ host: '::', port, exclusive: true }, () => {
-      server.close(() => resolve(true))
+      server.close(() => resolve())
     })
   })
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
+
+function systemErrorCode(error: unknown): string {
+  if (error && typeof error === 'object' && 'code' in error) {
+    return String(error.code)
+  }
+  return 'UNKNOWN'
 }
