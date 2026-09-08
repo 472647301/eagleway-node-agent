@@ -1,1 +1,1 @@
-eagleway-agent ALL=(root) NOPASSWD: /usr/local/libexec/eagleway-node-helper xray-install *, /usr/local/libexec/eagleway-node-helper xray-uninstall, /usr/local/libexec/eagleway-node-helper xray-start, /usr/local/libexec/eagleway-node-helper xray-stop
+eagleway-agent ALL=(root) NOPASSWD: /usr/local/libexec/eagleway-node-helper xray-install *, /usr/local/libexec/eagleway-node-helper xray-apply-config *, /usr/local/libexec/eagleway-node-helper xray-uninstall, /usr/local/libexec/eagleway-node-helper xray-start, /usr/local/libexec/eagleway-node-helper xray-stop

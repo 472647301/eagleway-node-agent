@@ -1,4 +1,4 @@
-export type OperationType = 'install' | 'uninstall'
+export type OperationType = 'install' | 'uninstall' | 'reconfigure'
 export type OperationState = 'pending' | 'running' | 'succeeded' | 'failed'
 
 export interface ManagedUserRecord {
@@ -29,4 +29,13 @@ export interface OwnedResourceRecord {
   ownershipTag: string
   createdAt: string
   removedAt: string | null
+}
+
+export interface RuntimeConfigRecord {
+  revision: number
+  protocol: string
+  port: number
+  domain: string
+  proxyUrl: string | null
+  configHash: string
 }

@@ -25,23 +25,26 @@ export class NodeRequestDto {
 }
 
 export class ProtocolControlDto extends NodeRequestDto {
-  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  revision!: number
+
   @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(65_535)
-  port?: number
+  port!: number
 
-  @IsOptional()
   @IsFQDN({ require_tld: true })
   @MaxLength(253)
-  domain?: string
+  domain!: string
 
   @IsOptional()
   @IsUrl({ protocols: ['http', 'https'], require_protocol: true })
   @Matches(/^[^\s{};#]+$/)
   @MaxLength(2048)
-  proxyUrl?: string
+  proxyUrl?: string | null
 }
 
 export class NodeUserDto {

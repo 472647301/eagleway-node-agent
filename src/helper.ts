@@ -23,9 +23,11 @@ import { spawnSync, type SpawnSyncReturns } from 'node:child_process'
 const stateDir = resolve(
   process.env.STATE_DIR || '/var/lib/eagleway-node-agent'
 )
+const runtimesDir = '/etc/eagleway-node-agent/runtimes'
 const runtimeDir = '/etc/eagleway-node-agent/runtimes/xray'
 const runtimeBinary = '/usr/local/bin/xray'
 const unitPath = '/etc/systemd/system/eagleway-xray.service'
+const runtimeConfigPath = join(runtimeDir, 'config.json')
 const runtimeMarker = join(runtimeDir, '.managed-by-eagleway-node-agent')
 const runtimeMarkerValue = 'eagleway-node-agent:xray:v1\n'
 const nginxMarker = '# Managed by eagleway-node-agent\n'
@@ -45,9 +47,10 @@ const xrayRelease = {
 
 type InstallPlan = {
   schemaVersion: 1
-  action: 'install'
+  action: 'install' | 'apply-config'
   nodeId: number
   protocol: 'trojan' | 'vless' | 'vmess'
+  revision: number
   hostProfile: 'ubuntu' | 'ubuntu-baota'
   architecture: keyof typeof xrayRelease.assets
   port: number
@@ -66,7 +69,11 @@ async function main(): Promise<void> {
   switch (action) {
     case 'xray-install':
       if (!argument) fail('Install plan is required')
-      await install(readPlan(argument))
+      await install(readPlan(argument, 'install'))
+      break
+    case 'xray-apply-config':
+      if (!argument) fail('Configuration plan is required')
+      await applyConfig(readPlan(argument, 'apply-config'))
       break
     case 'xray-uninstall':
       assertNoArgument(argument)
@@ -89,7 +96,10 @@ async function install(plan: InstallPlan): Promise<void> {
   assertUbuntu()
   assertManagedResourceBoundary()
   const artifact = xrayArtifact(plan.architecture)
-  mkdirSync(runtimeDir, { recursive: true, mode: 0o700 })
+  mkdirSync(runtimesDir, { recursive: true, mode: 0o711 })
+  chmodSync(runtimesDir, 0o711)
+  mkdirSync(runtimeDir, { recursive: true, mode: 0o711 })
+  chmodSync(runtimeDir, 0o711)
   atomicWrite(runtimeMarker, runtimeMarkerValue, 0o600)
   mkdirSync(join(stateDir, 'artifacts'), { recursive: true, mode: 0o700 })
   mkdirSync(join(stateDir, 'extract'), { recursive: true, mode: 0o700 })
@@ -115,22 +125,77 @@ async function install(plan: InstallPlan): Promise<void> {
 
   const certificate = ensureCertificate(plan)
   atomicWrite(
-    join(runtimeDir, 'config.json'),
+    runtimeConfigPath,
     `${JSON.stringify(xrayConfig(plan, certificate), null, 2)}\n`,
     0o600
   )
-  run(runtimeBinary, [
-    'run',
-    '-test',
-    '-config',
-    join(runtimeDir, 'config.json')
-  ])
+  run(runtimeBinary, ['run', '-test', '-config', runtimeConfigPath])
   atomicWrite(unitPath, systemdUnit(), 0o644)
   systemctl('daemon-reload')
   systemctl('enable', 'eagleway-xray.service')
   systemctl('restart', 'eagleway-xray.service')
   run('/usr/bin/systemctl', ['is-active', '--quiet', 'eagleway-xray.service'])
   rmSync(extractDir, { recursive: true, force: true })
+}
+
+async function applyConfig(plan: InstallPlan): Promise<void> {
+  assertUbuntu()
+  if (!isManagedRuntime() || !existsSync(runtimeConfigPath)) {
+    fail('Managed Xray runtime is not installed')
+  }
+  const certificate = ensureCertificate(plan)
+  const candidatePath = join(runtimeDir, `.config.next-${process.pid}.json`)
+  const backupPath = join(runtimeDir, `.config.backup-${process.pid}.json`)
+  atomicWrite(
+    candidatePath,
+    `${JSON.stringify(xrayConfig(plan, certificate), null, 2)}\n`,
+    0o600
+  )
+  const validation = run(
+    runtimeBinary,
+    ['run', '-test', '-config', candidatePath],
+    false
+  )
+  if (validation.error || validation.status !== 0) {
+    safeRemove(candidatePath)
+    fail('Candidate Xray configuration is invalid')
+  }
+
+  const wasActive =
+    run(
+      '/usr/bin/systemctl',
+      ['is-active', '--quiet', 'eagleway-xray.service'],
+      false
+    ).status === 0
+  copyFileSync(runtimeConfigPath, backupPath)
+  chmodSync(backupPath, 0o600)
+  renameSync(candidatePath, runtimeConfigPath)
+  chmodSync(runtimeConfigPath, 0o600)
+  if (wasActive) {
+    const restarted = run(
+      '/usr/bin/systemctl',
+      ['restart', 'eagleway-xray.service'],
+      false
+    )
+    const active = run(
+      '/usr/bin/systemctl',
+      ['is-active', '--quiet', 'eagleway-xray.service'],
+      false
+    )
+    if (
+      restarted.error ||
+      restarted.status !== 0 ||
+      active.error ||
+      active.status !== 0
+    ) {
+      copyFileSync(backupPath, runtimeConfigPath)
+      chmodSync(runtimeConfigPath, 0o600)
+      run('/usr/bin/systemctl', ['restart', 'eagleway-xray.service'], false)
+      safeRemove(backupPath)
+      fail('Xray configuration update failed and was rolled back')
+    }
+  }
+  safeRemove(backupPath)
 }
 
 function uninstall(): void {
@@ -325,7 +390,10 @@ WantedBy=multi-user.target
 `
 }
 
-function readPlan(path: string): InstallPlan {
+function readPlan(
+  path: string,
+  expectedAction: InstallPlan['action']
+): InstallPlan {
   const staging = realpathSync(join(stateDir, 'staging'))
   const actual = realpathSync(path)
   const fromRoot = relative(staging, actual)
@@ -346,6 +414,7 @@ function readPlan(path: string): InstallPlan {
     'action',
     'nodeId',
     'protocol',
+    'revision',
     'hostProfile',
     'architecture',
     'port',
@@ -356,12 +425,14 @@ function readPlan(path: string): InstallPlan {
   ])
   if (Object.keys(value).some((key) => !allowedKeys.has(key)))
     fail('Install plan has unknown fields')
-  if (value.schemaVersion !== 1 || value.action !== 'install')
+  if (value.schemaVersion !== 1 || value.action !== expectedAction)
     fail('Install plan version is invalid')
   if (!Number.isSafeInteger(value.nodeId) || Number(value.nodeId) <= 0)
     fail('nodeId is invalid')
   if (!['trojan', 'vless', 'vmess'].includes(String(value.protocol)))
     fail('Protocol is invalid')
+  if (!Number.isSafeInteger(value.revision) || Number(value.revision) < 1)
+    fail('Configuration revision is invalid')
   if (!['ubuntu', 'ubuntu-baota'].includes(String(value.hostProfile)))
     fail('Host profile is invalid')
   if (!['x64', 'arm64'].includes(String(value.architecture)))

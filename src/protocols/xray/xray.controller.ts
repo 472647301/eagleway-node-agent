@@ -33,6 +33,15 @@ export class XrayController {
     return success(await this.service.install(protocol, body))
   }
 
+  @Post('config/apply')
+  @HttpCode(HttpStatus.ACCEPTED)
+  async applyConfig(
+    @Param('protocol') protocol: string,
+    @Body() body: ProtocolControlDto
+  ) {
+    return success(await this.service.applyConfig(protocol, body))
+  }
+
   @Post('uninstall')
   @HttpCode(HttpStatus.ACCEPTED)
   async uninstall(

@@ -15,6 +15,7 @@ import { XRAY_PROTOCOLS, type XrayProtocol } from './xray.types'
 export interface XrayInstallInput {
   nodeId: number
   protocol: XrayProtocol
+  revision: number
   port: number
   domain: string
   proxyUrl: string | null
@@ -29,7 +30,10 @@ export class XrayProvisioningService {
     private readonly state: StateStoreService
   ) {}
 
-  async preflight(input: XrayInstallInput): Promise<HostInspection> {
+  async preflight(
+    input: XrayInstallInput,
+    currentPort: number | null = null
+  ): Promise<HostInspection> {
     const apiPort = Number(this.config.xrayApiAddress.split(':')[1])
     if (input.port === 80 || input.port === apiPort) {
       throw new AgentError(
@@ -40,7 +44,9 @@ export class XrayProvisioningService {
     }
     const host = this.inspector.inspect()
     await this.inspector.assertDomainReady(input.domain)
-    await this.inspector.assertPortAvailable(input.port)
+    if (currentPort !== input.port) {
+      await this.inspector.assertPortAvailable(input.port)
+    }
     const certificateAvailable = this.inspector.certificateAvailable(
       input.domain
     )
@@ -66,6 +72,7 @@ export class XrayProvisioningService {
       action: 'install',
       nodeId: input.nodeId,
       protocol: input.protocol,
+      revision: input.revision,
       hostProfile: host.profile,
       architecture: host.architecture,
       port: input.port,
@@ -108,6 +115,43 @@ export class XrayProvisioningService {
     }
   }
 
+  async applyConfig(
+    input: XrayInstallInput,
+    host: HostInspection
+  ): Promise<void> {
+    const createsAcmeConfig =
+      host.profile === 'ubuntu' &&
+      !this.inspector.certificateAvailable(input.domain)
+    const planPath = this.writePlan({
+      schemaVersion: 1,
+      action: 'apply-config',
+      nodeId: input.nodeId,
+      protocol: input.protocol,
+      revision: input.revision,
+      hostProfile: host.profile,
+      architecture: host.architecture,
+      port: input.port,
+      domain: input.domain,
+      proxyUrl: input.proxyUrl,
+      apiAddress: this.config.xrayApiAddress,
+      acmeEmail: this.config.acmeEmail
+    })
+    try {
+      await this.helper.run('xray-apply-config', planPath)
+      if (createsAcmeConfig) {
+        this.state.registerOwnedResource({
+          resourceType: 'nginx-config',
+          resourceName: `/etc/nginx/conf.d/eagleway-acme-${input.domain}.conf`,
+          ownershipTag: 'eagleway-node-agent:xray',
+          createdAt: new Date().toISOString(),
+          removedAt: null
+        })
+      }
+    } finally {
+      safeUnlink(planPath)
+    }
+  }
+
   async uninstall(): Promise<void> {
     await this.helper.run('xray-uninstall')
     for (const protocol of XRAY_PROTOCOLS) {
@@ -117,6 +161,7 @@ export class XrayProvisioningService {
       this.state.setMeta(`${protocol}.requiresUserSync`, 'true')
     }
     this.state.deleteMeta('xray.protocol')
+    this.state.deleteRuntimeConfig()
     this.state.markOwnedResourcesRemoved('eagleway-node-agent:xray')
   }
 

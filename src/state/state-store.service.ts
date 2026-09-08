@@ -5,7 +5,8 @@ import type {
   OperationRecord,
   OperationState,
   OperationType,
-  OwnedResourceRecord
+  OwnedResourceRecord,
+  RuntimeConfigRecord
 } from './state.types'
 
 type ManagedUserRow = {
@@ -242,6 +243,39 @@ export class StateStoreService {
 
   deleteMeta(key: string): void {
     this.database.db.prepare('DELETE FROM agent_meta WHERE key = ?').run(key)
+  }
+
+  runtimeConfig(): RuntimeConfigRecord | null {
+    const value = this.getMeta('xray.runtimeConfig')
+    if (!value) return null
+    try {
+      const parsed = JSON.parse(value) as Partial<RuntimeConfigRecord>
+      if (
+        !Number.isSafeInteger(parsed.revision) ||
+        Number(parsed.revision) < 1 ||
+        typeof parsed.protocol !== 'string' ||
+        !Number.isSafeInteger(parsed.port) ||
+        Number(parsed.port) < 1 ||
+        Number(parsed.port) > 65_535 ||
+        typeof parsed.domain !== 'string' ||
+        (parsed.proxyUrl !== null && typeof parsed.proxyUrl !== 'string') ||
+        typeof parsed.configHash !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(parsed.configHash)
+      ) {
+        return null
+      }
+      return parsed as RuntimeConfigRecord
+    } catch {
+      return null
+    }
+  }
+
+  setRuntimeConfig(config: RuntimeConfigRecord): void {
+    this.setMeta('xray.runtimeConfig', JSON.stringify(config))
+  }
+
+  deleteRuntimeConfig(): void {
+    this.deleteMeta('xray.runtimeConfig')
   }
 
   registerOwnedResource(record: OwnedResourceRecord): void {

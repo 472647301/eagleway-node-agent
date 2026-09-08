@@ -60,13 +60,17 @@ test('status API enforces node identity and the frozen response envelope', async
           nodeId: response.body.data.nodeId,
           protocol: response.body.data.protocol,
           runtime: response.body.data.runtime,
-          state: response.body.data.state
+          state: response.body.data.state,
+          configState: response.body.data.configState,
+          appliedConfigRevision: response.body.data.appliedConfigRevision
         },
         {
           nodeId: 42,
           protocol,
           runtime: 'xray-core',
-          state: 'not_installed'
+          state: 'not_installed',
+          configState: 'unconfigured',
+          appliedConfigRevision: null
         }
       )
     }
@@ -111,6 +115,11 @@ test('status API enforces node identity and the frozen response envelope', async
     await request(app.getHttpServer())
       .post('/api/log/pages')
       .send({ filename: 'agent.log', page: 1, pageSize: 501 })
+      .expect(400)
+
+    await request(app.getHttpServer())
+      .post('/api/trojan/config/apply')
+      .send({ nodeId: 42, port: 9443, domain: 'node.example.com' })
       .expect(400)
   } finally {
     await app.close()

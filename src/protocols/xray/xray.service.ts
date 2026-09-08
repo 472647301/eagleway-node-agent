@@ -1,4 +1,5 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common'
+import { createHash } from 'node:crypto'
 import { AgentError, invalidRequest } from '@/common/api/agent-error'
 import { APP_CONFIG, type AppConfig } from '@/config/app-config'
 import { OperationCoordinatorService } from '@/operations/operation-coordinator.service'
@@ -28,8 +29,8 @@ export class XrayService {
   async install(protocolValue: string, body: ProtocolControlDto) {
     const protocol = this.protocol(protocolValue)
     this.assertNode(body.nodeId)
-    if (!body.port) throw invalidRequest('port is required for install')
-    if (!body.domain) throw invalidRequest('domain is required for install')
+    const input = configInput(protocol, body)
+    const configHash = runtimeConfigHash(input)
     const installedProtocol = this.installedProtocol()
     if (
       this.client.hasManagedResources() &&
@@ -40,16 +41,20 @@ export class XrayService {
         `Xray is already installed for ${installedProtocol}; uninstall it before changing protocol`
       )
     }
-    const latest = this.state.latestOperation('xray')
-    if (this.client.isInstalled() && latest?.state !== 'failed') {
-      return { operationId: null, state: await this.runtimeState(protocol) }
-    }
-    const input = {
-      nodeId: body.nodeId,
-      protocol,
-      port: body.port,
-      domain: body.domain,
-      proxyUrl: body.proxyUrl ?? null
+    if (this.client.isInstalled()) {
+      const current = this.state.runtimeConfig()
+      if (current?.configHash === configHash) {
+        return {
+          operationId: null,
+          state: await this.runtimeState(protocol),
+          appliedConfigRevision: current.revision
+        }
+      }
+      throw new AgentError(
+        'CONFIG_MISMATCH',
+        'Xray is installed with a different configuration; use config/apply',
+        HttpStatus.CONFLICT
+      )
     }
     const host = await this.provisioning.preflight(input)
     const operation = this.operations.start(
@@ -59,10 +64,80 @@ export class XrayService {
       async (context) => {
         context.stage('installing-runtime')
         await this.provisioning.install(input, host)
+        this.state.setRuntimeConfig({ ...input, configHash })
       },
       'not_installed'
     )
     return { operationId: operation.operationId, state: 'installing' }
+  }
+
+  async applyConfig(protocolValue: string, body: ProtocolControlDto) {
+    const protocol = this.protocol(protocolValue)
+    this.assertNode(body.nodeId)
+    this.assertInstalledProtocol(protocol)
+    const input = configInput(protocol, body)
+    const configHash = runtimeConfigHash(input)
+    const current = this.state.runtimeConfig()
+    if (current && input.revision < current.revision) {
+      throw new AgentError(
+        'STALE_CONFIG_REVISION',
+        'Configuration revision is older than the applied revision',
+        HttpStatus.CONFLICT
+      )
+    }
+    if (current && input.revision === current.revision) {
+      if (configHash !== current.configHash) {
+        throw new AgentError(
+          'CONFIG_REVISION_CONFLICT',
+          'Configuration revision does not match the applied payload',
+          HttpStatus.CONFLICT
+        )
+      }
+      return {
+        operationId: null,
+        state: await this.runtimeState(protocol),
+        appliedConfigRevision: current.revision
+      }
+    }
+    if (current?.configHash === configHash) {
+      this.state.setRuntimeConfig({ ...input, configHash })
+      return {
+        operationId: null,
+        state: await this.runtimeState(protocol),
+        appliedConfigRevision: input.revision
+      }
+    }
+
+    const previous = await this.runtimeState(protocol)
+    const host = await this.provisioning.preflight(
+      input,
+      current?.port ?? input.port
+    )
+    const operation = this.operations.start(
+      'xray',
+      'reconfigure',
+      input,
+      async (context) => {
+        context.stage('applying-configuration')
+        await this.provisioning.applyConfig(input, host)
+        this.state.setRuntimeConfig({ ...input, configHash })
+        this.state.setMeta(`${protocol}.requiresUserSync`, 'true')
+        if (previous === 'online') {
+          try {
+            context.stage('restoring-users')
+            await this.assignments.restoreStoredUsers(protocol)
+          } catch {
+            this.state.setMeta(`${protocol}.requiresUserSync`, 'true')
+          }
+        }
+      },
+      previous
+    )
+    return {
+      operationId: operation.operationId,
+      state: 'reconfiguring',
+      acceptedRevision: input.revision
+    }
   }
 
   async uninstall(protocolValue: string, body: NodeRequestDto) {
@@ -176,13 +251,29 @@ export class XrayService {
       (!controlSuccessAt ||
         !latest.finishedAt ||
         latest.finishedAt > controlSuccessAt)
-    const runtimeState = active
-      ? active.operationType === 'install'
+    const activeLifecycle =
+      active && active.operationType !== 'reconfigure' ? active : null
+    const unresolvedLifecycleFailure =
+      unresolvedFailure && latest?.operationType !== 'reconfigure'
+    const runtimeState = activeLifecycle
+      ? activeLifecycle.operationType === 'install'
         ? 'installing'
         : 'uninstalling'
-      : unresolvedFailure
+      : unresolvedLifecycleFailure
         ? 'error'
         : observedRuntimeState
+    const runtimeConfig = this.state.runtimeConfig()
+    const configState =
+      active?.operationType === 'reconfigure' ||
+      active?.operationType === 'install'
+        ? 'applying'
+        : unresolvedFailure &&
+            (latest?.operationType === 'reconfigure' ||
+              latest?.operationType === 'install')
+          ? 'failed'
+          : runtimeConfig
+            ? 'applied'
+            : 'unconfigured'
     return {
       nodeId: this.config.nodeId,
       protocol,
@@ -190,6 +281,8 @@ export class XrayService {
       runtimeVersion: await this.client.version(),
       state: runtimeState,
       startedAt: null,
+      configState,
+      appliedConfigRevision: runtimeConfig?.revision ?? null,
       requiresUserSync:
         this.state.getMeta(`${protocol}.requiresUserSync`) !== 'false',
       activeOperation: active
@@ -293,4 +386,30 @@ export class XrayService {
     }
     return (await this.client.isActive()) ? 'online' : 'stopped'
   }
+}
+
+function configInput(protocol: XrayProtocol, body: ProtocolControlDto) {
+  return {
+    nodeId: body.nodeId,
+    protocol,
+    revision: body.revision,
+    port: body.port,
+    domain: body.domain.toLowerCase(),
+    proxyUrl: body.proxyUrl ?? null
+  }
+}
+
+export function runtimeConfigHash(
+  input: ReturnType<typeof configInput>
+): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        protocol: input.protocol,
+        port: input.port,
+        domain: input.domain,
+        proxyUrl: input.proxyUrl
+      })
+    )
+    .digest('hex')
 }

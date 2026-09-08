@@ -1,6 +1,6 @@
 # Eagleway Node Agent
 
-Eagleway Node Agent 是部署在自有 VPS 上的节点控制代理。它接收 Eagleway Network API 的控制请求，管理本机协议运行时和用户，并向中心服务上报流量快照。
+Eagleway Node Agent 是 Eagleway Network VPN 代理应用部署在自有 VPS 上的节点控制代理。中心接口端位于私有仓库 `eagleway-network-api`；Agent 接收中心控制请求，管理本机协议运行时和用户，并向中心服务上报流量快照。
 
 项目当前已经进入 MVP 实施阶段。已实现节点 API、SQLite 状态、Xray-core 三协议用户适配、流量上报、日志读取、Ubuntu/宝塔预检和受限提权 helper；真实 Ubuntu 与宝塔 VPS 灰度仍是发布前门槛。
 
@@ -40,6 +40,7 @@ Agent 不是中心数据库的副本。中心服务始终是节点配置、用�
 
 ## 文档
 
+- [运维与服务器自测手册](docs/operations-runbook.md)
 - [架构设计](docs/architecture.md)
 - [节点 API 契约](docs/node-api-contract.md)
 - [安装与运维设计](docs/installation-and-operations.md)
@@ -67,15 +68,15 @@ pnpm verify
 在准备好的源码目录执行：
 
 ```bash
-sudo ./scripts/bootstrap-ubuntu.sh \
-  /path/to/eagleway-node-agent \
-  <node-id> \
-  <center-ip/32> \
-  <bandwidth-mbps> \
-  <center-api-url>
+cp .env.example .env
+# 编辑 .env，至少正确配置 NODE_ID、ALLOWED_CIDRS、
+# SERVER_BANDWIDTH_MBPS 和 REPORTING_ENABLED。
+sudo ./scripts/bootstrap-ubuntu.sh
 ```
 
-Bootstrap 会创建低权限用户、安装 PM2、构建项目、安装受限 helper 并配置单实例开机启动。应用发布目录和 helper 均归 root 所有，Agent 用户只有状态、密钥和日志目录所需权限。
+Bootstrap 默认读取仓库根目录的 `.env`；也可以将源码目录作为唯一参数传入。缺少必要配置、生产配置无效，或者启用上报但未设置 `CENTER_API_URL` 时，脚本会在安装前报错。Bootstrap 会创建低权限用户、安装 PM2、构建项目、安装受限 helper 并配置单实例开机启动。应用发布目录和 helper 均归 root 所有，Agent 用户只有状态、密钥和日志目录所需权限。
+
+首次部署、服务器本机全功能自测、与中心联调、源码升级和人工回滚的可执行步骤见[运维与服务器自测手册](docs/operations-runbook.md)。
 
 安装协议时，受限 helper 会根据 VPS 架构直接下载源码中固定的 XTLS 官方 GitHub Release（当前为稳定版 `v26.3.27`），并使用源码内固定的 SHA-256 校验后再安装。控制请求和环境变量都不能改变下载地址、版本或校验值；升级 Xray-core 需要发布新版 Agent。
 

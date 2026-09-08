@@ -3,7 +3,11 @@ import { APP_CONFIG, type AppConfig } from '@/config/app-config'
 import { ProcessRunnerService } from './process-runner.service'
 
 export type HelperAction =
-  'xray-install' | 'xray-uninstall' | 'xray-start' | 'xray-stop'
+  | 'xray-install'
+  | 'xray-apply-config'
+  | 'xray-uninstall'
+  | 'xray-start'
+  | 'xray-stop'
 
 @Injectable()
 export class PrivilegedHelperService {

@@ -49,6 +49,9 @@
 | 409 | INVALID_STATE | 当前运行状态不允许该操作 |
 | 409 | OPERATION_CONFLICT | 存在冲突的主机修改操作 |
 | 409 | PORT_IN_USE | 目标端口已被其他服务占用 |
+| 409 | CONFIG_MISMATCH | 已安装配置与 install 请求不同，应使用 config/apply |
+| 409 | STALE_CONFIG_REVISION | 请求版本旧于节点已生效版本 |
+| 409 | CONFIG_REVISION_CONFLICT | 相同版本对应了不同配置内容 |
 | 422 | UNSUPPORTED_OS | 操作系统不在支持范围 |
 | 422 | UNSUPPORTED_HOST_PROFILE | 宝塔/Web 服务组合未支持 |
 | 422 | DNS_NOT_READY | 域名尚未满足安装条件 |
@@ -68,6 +71,7 @@
 ```json
 {
   "nodeId": 12,
+  "revision": 1,
   "port": 8443,
   "domain": "node.example.com",
   "proxyUrl": "https://example.org"
@@ -96,9 +100,28 @@
 }
 ```
 
-相同安装已在执行时返回同一个 operationId。已经以相同配置安装时返回当前状态，不重复安装。
+相同安装已在执行时返回同一个 operationId。已经以相同配置安装时返回当前状态，不重复安装；已安装但配置内容不同时返回 `CONFIG_MISMATCH`。
 
-### 4.2 卸载
+### 4.2 应用配置
+
+`POST /api/{protocol}/config/apply`
+
+请求字段与 install 一致。revision 必须单调递增；相同 revision 和相同配置幂等成功，相同 revision 和不同配置返回冲突。Agent 会先检查端口、域名和证书，验证候选 Xray 配置后原子切换。运行时重启失败时恢复旧配置。
+
+成功接受返回 HTTP 202：
+
+```json
+{
+  "code": 0,
+  "data": {
+    "operationId": "01J...",
+    "state": "reconfiguring",
+    "acceptedRevision": 4
+  }
+}
+```
+
+### 4.3 卸载
 
 `POST /api/{protocol}/uninstall`
 
@@ -106,13 +129,13 @@
 
 成功接受返回 HTTP 202 和 operationId。
 
-### 4.3 启动
+### 4.4 启动
 
 `POST /api/{protocol}/start`
 
 启动是同步操作。只有运行时服务启动成功、目标端口符合预期后才返回 `online`。
 
-### 4.4 停止
+### 4.5 停止
 
 `POST /api/{protocol}/stop`
 
@@ -216,6 +239,8 @@ add 表示 upsert。重复请求不得创建重复运行时用户。
     "runtimeVersion": "pinned-version",
     "state": "installing",
     "startedAt": null,
+    "configState": "applying",
+    "appliedConfigRevision": null,
     "requiresUserSync": false,
     "activeOperation": {
       "operationId": "01J...",

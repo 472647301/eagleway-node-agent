@@ -39,6 +39,25 @@ test('SQLite state persists encrypted user mappings and monotonic report time', 
     const first = state.nextReportedAt(new Date('2026-09-04T00:00:00.000Z'))
     const second = state.nextReportedAt(new Date('2026-09-03T00:00:00.000Z'))
     assert.ok(new Date(second).getTime() > new Date(first).getTime())
+
+    state.setRuntimeConfig({
+      revision: 4,
+      protocol: 'trojan',
+      port: 9443,
+      domain: 'node.example.com',
+      proxyUrl: null,
+      configHash: 'a'.repeat(64)
+    })
+    assert.deepEqual(state.runtimeConfig(), {
+      revision: 4,
+      protocol: 'trojan',
+      port: 9443,
+      domain: 'node.example.com',
+      proxyUrl: null,
+      configHash: 'a'.repeat(64)
+    })
+    state.deleteRuntimeConfig()
+    assert.equal(state.runtimeConfig(), null)
     database.onApplicationShutdown()
   } finally {
     rmSync(directory, { recursive: true, force: true })
