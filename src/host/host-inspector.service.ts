@@ -137,7 +137,11 @@ export async function portAvailable(port: number): Promise<boolean> {
       await probePort(port)
       return true
     } catch (error) {
-      if (systemErrorCode(error) !== 'EADDRINUSE') throw error
+      const errorCode = systemErrorCode(error)
+      if (errorCode === 'EACCES' && process.platform === 'linux') {
+        return !linuxTcpPortListening(port)
+      }
+      if (errorCode !== 'EADDRINUSE') throw error
       if (attempt === attempts) return false
       await delay(100)
     }
@@ -158,6 +162,26 @@ function probePort(port: number): Promise<void> {
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
+
+function linuxTcpPortListening(port: number): boolean {
+  return ['/proc/net/tcp', '/proc/net/tcp6'].some((path) => {
+    try {
+      return tcpTableHasListeningPort(readFileSync(path, 'utf8'), port)
+    } catch (error) {
+      if (systemErrorCode(error) === 'ENOENT') return false
+      throw error
+    }
+  })
+}
+
+export function tcpTableHasListeningPort(value: string, port: number): boolean {
+  const expectedPort = port.toString(16).toUpperCase().padStart(4, '0')
+  return value.split(/\r?\n/).some((line) => {
+    const columns = line.trim().split(/\s+/)
+    if (columns.length < 4 || columns[3] !== '0A') return false
+    return columns[1]?.split(':').at(-1)?.toUpperCase() === expectedPort
+  })
 }
 
 function systemErrorCode(error: unknown): string {
