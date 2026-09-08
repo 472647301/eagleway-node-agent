@@ -91,6 +91,7 @@ chown -R root:root "${RELEASE_DIR}"
 chmod -R go-w "${RELEASE_DIR}"
 
 ln -sfn "${RELEASE_DIR}" "${INSTALL_ROOT}/current"
+install -d -o root -g root -m 0755 /usr/local/libexec
 install -o root -g root -m 0755 \
   "${RELEASE_DIR}/scripts/eagleway-node-helper" \
   /usr/local/libexec/eagleway-node-helper
