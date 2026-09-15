@@ -10,7 +10,7 @@ import {
   statSync
 } from 'node:fs'
 import { isAbsolute, join, relative, sep } from 'node:path'
-import { invalidRequest } from '@/common/api/agent-error'
+import { invalidRequest, runtimeUnavailable } from '@/common/api/agent-error'
 import { APP_CONFIG, type AppConfig } from '@/config/app-config'
 import type { LogPageDto } from './log.dto'
 
@@ -99,7 +99,12 @@ export class LogReaderService {
       throw invalidRequest('Log file not found')
     }
 
-    const page = readNewestLines(path, body.page, body.pageSize)
+    let page: RawLogPage
+    try {
+      page = readNewestLines(path, body.page, body.pageSize)
+    } catch {
+      throw runtimeUnavailable('Log file is temporarily unavailable')
+    }
     return {
       data: page.lines.map((line) => parseLogLine(line)),
       total: page.total

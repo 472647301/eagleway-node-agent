@@ -6,14 +6,21 @@ import {
 } from 'node:crypto'
 import {
   chmodSync,
+  closeSync,
+  constants,
   copyFileSync,
   existsSync,
+  fchmodSync,
+  fchownSync,
+  fstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   unlinkSync,
   writeFileSync
 } from 'node:fs'
@@ -30,6 +37,11 @@ const unitPath = '/etc/systemd/system/eagleway-xray.service'
 const runtimeConfigPath = join(runtimeDir, 'config.json')
 const runtimeMarker = join(runtimeDir, '.managed-by-eagleway-node-agent')
 const runtimeMarkerValue = 'eagleway-node-agent:xray:v1\n'
+const runtimeLogDir = '/var/log/eagleway-node-agent'
+const runtimeLogPaths = [
+  join(runtimeLogDir, 'xray-access.log'),
+  join(runtimeLogDir, 'xray-error.log')
+]
 const nginxMarker = '# Managed by eagleway-node-agent\n'
 const xrayRelease = {
   version: 'v26.3.27',
@@ -81,11 +93,16 @@ async function main(): Promise<void> {
       break
     case 'xray-start':
       assertNoArgument(argument)
+      prepareRuntimeLogs()
       systemctl('start', 'eagleway-xray.service')
       break
     case 'xray-stop':
       assertNoArgument(argument)
       systemctl('stop', 'eagleway-xray.service')
+      break
+    case 'xray-prepare-logs':
+      assertNoArgument(argument)
+      prepareRuntimeLogs()
       break
     default:
       fail('Unsupported helper action')
@@ -129,6 +146,7 @@ async function install(plan: InstallPlan): Promise<void> {
     `${JSON.stringify(xrayConfig(plan, certificate), null, 2)}\n`,
     0o600
   )
+  prepareRuntimeLogs()
   run(runtimeBinary, ['run', '-test', '-config', runtimeConfigPath])
   atomicWrite(unitPath, systemdUnit(), 0o644)
   systemctl('daemon-reload')
@@ -151,6 +169,7 @@ async function applyConfig(plan: InstallPlan): Promise<void> {
     `${JSON.stringify(xrayConfig(plan, certificate), null, 2)}\n`,
     0o600
   )
+  prepareRuntimeLogs()
   const validation = run(
     runtimeBinary,
     ['run', '-test', '-config', candidatePath],
@@ -324,8 +343,8 @@ function xrayConfig(
         : { clients: [] }
   return {
     log: {
-      access: '/var/log/eagleway-node-agent/xray-access.log',
-      error: '/var/log/eagleway-node-agent/xray-error.log',
+      access: runtimeLogPaths[0],
+      error: runtimeLogPaths[1],
       loglevel: 'warning'
     },
     api: {
@@ -374,6 +393,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+ExecStartPre=/usr/local/libexec/eagleway-node-helper xray-prepare-logs
 ExecStart=/usr/local/bin/xray run -config /etc/eagleway-node-agent/runtimes/xray/config.json
 Restart=on-failure
 RestartSec=3
@@ -388,6 +408,27 @@ LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 `
+}
+
+function prepareRuntimeLogs(): void {
+  const owner = statSync(runtimeLogDir)
+  for (const path of runtimeLogPaths) {
+    const file = openSync(
+      path,
+      constants.O_APPEND |
+        constants.O_CREAT |
+        constants.O_NOFOLLOW |
+        constants.O_WRONLY,
+      0o640
+    )
+    try {
+      if (!fstatSync(file).isFile()) fail('Xray log path is not a regular file')
+      fchownSync(file, owner.uid, owner.gid)
+      fchmodSync(file, 0o640)
+    } finally {
+      closeSync(file)
+    }
+  }
 }
 
 function readPlan(

@@ -679,6 +679,7 @@ sudo certbot renew --dry-run
     delaycompress
     missingok
     notifempty
+    create 0640 eagleway-agent eagleway-agent
     copytruncate
 }
 ~~~

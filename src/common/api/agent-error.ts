@@ -17,3 +17,11 @@ export function invalidRequest(message: string): AgentError {
 export function operationConflict(message: string): AgentError {
   return new AgentError('OPERATION_CONFLICT', message, HttpStatus.CONFLICT)
 }
+
+export function runtimeUnavailable(message: string): AgentError {
+  return new AgentError(
+    'RUNTIME_UNAVAILABLE',
+    message,
+    HttpStatus.SERVICE_UNAVAILABLE
+  )
+}

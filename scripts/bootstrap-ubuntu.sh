@@ -170,6 +170,7 @@ install -d -o root -g root -m 0755 /usr/local/libexec
 install -o root -g root -m 0755 \
   "${RELEASE_DIR}/scripts/eagleway-node-helper" \
   /usr/local/libexec/eagleway-node-helper
+/usr/local/libexec/eagleway-node-helper xray-prepare-logs
 install -o root -g root -m 0440 \
   "${RELEASE_DIR}/scripts/eagleway-node-agent.sudoers" \
   /etc/sudoers.d/eagleway-node-agent
