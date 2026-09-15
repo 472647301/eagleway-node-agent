@@ -71,6 +71,15 @@ test('log parser accepts legacy lines and redacts recognizable secrets', () => {
   assert.ok(!structured.raw.includes('header-secret'))
 })
 
+test('log parser does not invent metadata for unstructured lines', () => {
+  const parsed = parseLogLine('  continuation line  ')
+  assert.equal(parsed.timestamp, '')
+  assert.equal(parsed.level, 'UNKNOWN')
+  assert.equal(parsed.category, 'N/A')
+  assert.equal(parsed.message, 'continuation line')
+  assert.equal(parsed.raw, '  continuation line  ')
+})
+
 test('log reader handles CRLF, files without a trailing newline and empty files', () => {
   const directory = mkdtempSync(join(tmpdir(), 'eagleway-agent-log-lines-'))
   try {

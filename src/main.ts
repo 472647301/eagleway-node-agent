@@ -1,5 +1,5 @@
 import 'reflect-metadata'
-import { ValidationPipe } from '@nestjs/common'
+import { ConsoleLogger, ValidationPipe } from '@nestjs/common'
 import { NestFactory } from '@nestjs/core'
 import { NestExpressApplication } from '@nestjs/platform-express'
 import compression from 'compression'
@@ -9,7 +9,9 @@ import { APP_CONFIG, type AppConfig } from './config/app-config'
 import { HttpExceptionFilter } from './common/api/http-exception.filter'
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule)
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    logger: new ConsoleLogger({ json: true, colors: false })
+  })
   const config = app.get<AppConfig>(APP_CONFIG)
   app.setGlobalPrefix('api')
   app.set('trust proxy', config.trustProxy ? 'loopback' : false)

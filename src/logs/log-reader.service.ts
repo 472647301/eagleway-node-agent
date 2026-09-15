@@ -217,7 +217,7 @@ export function parseLogLine(logLine: string): ParsedLogLine {
   }
 
   return {
-    timestamp: new Date().toISOString(),
+    timestamp: '',
     level: 'UNKNOWN',
     category: 'N/A',
     message: raw.trim(),

@@ -10,7 +10,6 @@ module.exports = {
       watch: false,
       kill_timeout: 15000,
       max_memory_restart: '512M',
-      time: true,
       out_file: '/var/log/eagleway-node-agent/agent.log',
       error_file: '/var/log/eagleway-node-agent/agent-error.log',
       merge_logs: true,
