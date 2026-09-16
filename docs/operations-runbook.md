@@ -77,7 +77,7 @@ Node.apiEndpoint 是 Agent 控制地址，例如 http://node-ip:8086；它不是
 - 云安全组按需放行 TCP 80、Agent 控制端口和协议端口。
 - Agent 控制端口只允许中心出口 IP，不得对整个公网开放。
 - 普通 Ubuntu 首次签发证书时需要 TCP 80；已有可复用证书时可跳过签发。
-- 宝塔环境必须先在宝塔签发目标域名证书。
+- 宝塔环境缺少证书时，Agent 会读取目标域名的 Nginx WebRoot 并执行 ACME HTTP-01；`bt` 命令没有稳定的按域名签发接口，Agent 不调用版本相关的菜单编号。
 - 目标协议端口不能被其他进程占用。
 - 如果已有非 Eagleway 管理的 /usr/local/bin/xray、Xray unit 或运行时目录，安装会拒绝覆盖。
 

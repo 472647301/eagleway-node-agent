@@ -261,34 +261,46 @@ function ensureCertificate(plan: InstallPlan): { cert: string; key: string } {
     validateCertificate(existing, plan.domain)
     return existing
   }
-  if (plan.hostProfile === 'ubuntu-baota') {
-    fail('BaoTa certificate is unavailable; issue it in BaoTa before retrying')
-  }
 
-  run('/usr/bin/apt-get', ['update'])
-  run('/usr/bin/apt-get', [
-    'install',
-    '-y',
-    '--no-install-recommends',
-    'nginx',
-    'certbot'
-  ])
-  const webroot = '/var/www/eagleway-acme'
+  if (plan.hostProfile === 'ubuntu') {
+    run('/usr/bin/apt-get', ['update'])
+    run('/usr/bin/apt-get', [
+      'install',
+      '-y',
+      '--no-install-recommends',
+      'nginx',
+      'certbot'
+    ])
+  } else if (!existsSync('/usr/bin/certbot')) {
+    run('/usr/bin/apt-get', ['update'])
+    run('/usr/bin/apt-get', [
+      'install',
+      '-y',
+      '--no-install-recommends',
+      'certbot'
+    ])
+  }
+  const webroot =
+    plan.hostProfile === 'ubuntu-baota'
+      ? baotaWebroot(plan.domain)
+      : '/var/www/eagleway-acme'
   mkdirSync(webroot, { recursive: true, mode: 0o755 })
   const nginxPath = `/etc/nginx/conf.d/eagleway-acme-${plan.domain}.conf`
-  if (
-    existsSync(nginxPath) &&
-    !readFileSync(nginxPath, 'utf8').startsWith(nginxMarker)
-  ) {
-    fail('Existing Nginx configuration is not owned by Eagleway')
+  if (plan.hostProfile === 'ubuntu') {
+    if (
+      existsSync(nginxPath) &&
+      !readFileSync(nginxPath, 'utf8').startsWith(nginxMarker)
+    ) {
+      fail('Existing Nginx configuration is not owned by Eagleway')
+    }
+    atomicWrite(nginxPath, nginxConfig(plan, webroot), 0o644)
+    run('/usr/sbin/nginx', ['-t'])
+    systemctl('enable', 'nginx')
+    const nginxActive =
+      run('/usr/bin/systemctl', ['is-active', '--quiet', 'nginx'], false)
+        .status === 0
+    systemctl(nginxActive ? 'reload' : 'start', 'nginx')
   }
-  atomicWrite(nginxPath, nginxConfig(plan, webroot), 0o644)
-  run('/usr/sbin/nginx', ['-t'])
-  systemctl('enable', 'nginx')
-  const nginxActive =
-    run('/usr/bin/systemctl', ['is-active', '--quiet', 'nginx'], false)
-      .status === 0
-  systemctl(nginxActive ? 'reload' : 'start', 'nginx')
   const certbotArgs = [
     'certonly',
     '--webroot',
@@ -309,6 +321,35 @@ function ensureCertificate(plan: InstallPlan): { cert: string; key: string } {
   }
   validateCertificate(issued, plan.domain)
   return issued
+}
+
+function baotaWebroot(domain: string): string {
+  const directory = '/www/server/panel/vhost/nginx'
+  if (!existsSync(directory)) {
+    fail('BaoTa Nginx vhost directory is unavailable')
+  }
+  const domainPattern = new RegExp(`(?:^|\\s)${escapeRegExp(domain)}(?:\\s|$)`)
+  for (const name of readdirSync(directory)) {
+    if (!name.endsWith('.conf')) continue
+    const path = join(directory, name)
+    const content = readFileSync(path, 'utf8')
+    if (!/\bserver_name\s+[^;]*;/.test(content)) continue
+    if (
+      !content.split(/\bserver\s*\{/).some((block) => {
+        return domainPattern.test(
+          block.match(/\bserver_name\s+([^;]+);/)?.[1] ?? ''
+        )
+      })
+    )
+      continue
+    const root = content.match(/\broot\s+([^;{}]+);/)?.[1]?.trim()
+    if (root && existsSync(root) && statSync(root).isDirectory()) return root
+  }
+  fail(`BaoTa Nginx site root was not found for ${domain}`)
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function nginxConfig(plan: InstallPlan, webroot: string): string {

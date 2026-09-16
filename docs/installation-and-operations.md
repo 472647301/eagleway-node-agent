@@ -100,7 +100,7 @@ helper 不接受任意命令字符串、任意 unit、任意目标路径或 shel
 3. 枚举目标端口监听和相关 vhost。
 4. 如果目标 Trojan 端口被占用，返回 `PORT_IN_USE`。
 5. 查找目标域名已有证书；存在时只读引用。
-6. 不存在证书时返回 `CERTIFICATE_UNAVAILABLE`，由管理员先在宝塔签发证书；第一阶段不自动改写宝塔 WebRoot。
+6. 不存在证书时，Agent 复用宝塔目标站点的 Nginx WebRoot 执行 ACME HTTP-01 签发；不调用版本相关的 `bt` 菜单编号，也不改写宝塔站点配置。
 7. 只读引用宝塔证书并写入 Agent 自有配置，不覆盖宝塔已有站点。
 8. 执行 Nginx 配置检查，通过后 reload。
 9. 启动并验证 Xray-core。

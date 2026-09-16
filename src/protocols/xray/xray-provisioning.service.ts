@@ -50,13 +50,6 @@ export class XrayProvisioningService {
     const certificateAvailable = this.inspector.certificateAvailable(
       input.domain
     )
-    if (host.profile === 'ubuntu-baota' && !certificateAvailable) {
-      throw new AgentError(
-        'CERTIFICATE_UNAVAILABLE',
-        'Issue a certificate for this domain in BaoTa before installing',
-        422
-      )
-    }
     if (host.profile === 'ubuntu' && !certificateAvailable) {
       await this.inspector.assertPortAvailable(80)
     }
