@@ -6,6 +6,12 @@ readonly INSTALL_ROOT="/opt/eagleway-node-agent"
 readonly CONFIG_ROOT="/etc/eagleway-node-agent"
 readonly STATE_ROOT="/var/lib/eagleway-node-agent"
 readonly LOG_ROOT="/var/log/eagleway-node-agent"
+readonly APT_LOCK_TIMEOUT_SECONDS=600
+
+run_apt_get() {
+  echo "Running apt-get; waiting up to ${APT_LOCK_TIMEOUT_SECONDS}s for package manager locks..."
+  apt-get -o "DPkg::Lock::Timeout=${APT_LOCK_TIMEOUT_SECONDS}" "$@"
+}
 
 usage() {
   echo "Usage: sudo $0 [source-directory]" >&2
@@ -107,8 +113,8 @@ assert_fixed_env XRAY_BINARY /usr/local/bin/xray
 assert_fixed_env PRIVILEGED_HELPER /usr/local/libexec/eagleway-node-helper
 
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y --no-install-recommends ca-certificates curl gnupg rsync sudo unzip build-essential python3
+run_apt_get update
+run_apt_get install -y --no-install-recommends ca-certificates curl gnupg rsync sudo unzip build-essential python3
 
 NODE_MAJOR=0
 if command -v node >/dev/null 2>&1; then
@@ -123,8 +129,8 @@ if (( NODE_MAJOR < 22 )); then
   rm -f /tmp/eagleway-nodesource.gpg.key
   echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
     > /etc/apt/sources.list.d/nodesource.list
-  apt-get update
-  apt-get install -y --no-install-recommends nodejs
+  run_apt_get update
+  run_apt_get install -y --no-install-recommends nodejs
 fi
 
 node -e "if (Number(process.versions.node.split('.')[0]) < 22) process.exit(1)"
