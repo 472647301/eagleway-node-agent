@@ -173,7 +173,7 @@ curl -fsSL "https://raw.githubusercontent.com/472647301/eagleway-node-agent/${TA
 bash /tmp/eagleway-deploy.sh "${TAG}"
 ~~~
 
-脚本自动识别 `x86_64`/`aarch64`，从公开 GitHub Release 下载对应包和 `.sha256` 文件，完成校验、解压和 Bootstrap。首次运行会创建 `~/.config/eagleway-node-agent/agent.env` 并打开 nano 或 vi；保存配置后会继续部署。校验失败时脚本不会执行包内 Bootstrap。
+脚本自动识别 `x86_64`/`aarch64`，从公开 GitHub Release 下载对应包和 `.sha256` 文件，完成校验、解压和 Bootstrap。首次运行会创建 `~/.config/eagleway-node-agent/agent.env` 并优先使用 Vim 打开，未安装完整 Vim 时回退到 vi；保存配置后会继续部署。校验失败时脚本不会执行包内 Bootstrap。
 
 Bootstrap 会安装基础运行依赖、Node.js 22 和 PM2 6，校验 release manifest 与本机平台，创建低权限用户，复制 CI 已构建的不可变 release，验证 `better-sqlite3` 原生模块，安装 helper 和 sudo 规则，注册 PM2 开机启动并启动 Agent。VPS 不安装 pnpm、TypeScript、Nest CLI 或编译工具。重复执行会产生新的 release，不会删除 SQLite、state.key、证书或 Xray 用户状态。
 

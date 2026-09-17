@@ -54,12 +54,12 @@ if [[ ! -f "${ENV_FILE_INPUT}" ]]; then
   [[ -z "${DOWNLOADED_TEMPLATE}" ]] || rm -f -- "${DOWNLOADED_TEMPLATE}"
   echo "Created ${ENV_FILE_INPUT}"
   if [[ -t 0 && -t 1 ]]; then
-    if command -v nano >/dev/null 2>&1; then
-      nano "${ENV_FILE_INPUT}"
+    if command -v vim >/dev/null 2>&1; then
+      vim "${ENV_FILE_INPUT}"
     elif command -v vi >/dev/null 2>&1; then
       vi "${ENV_FILE_INPUT}"
     else
-      echo "Edit this file, then rerun: $0 ${RELEASE_TAG} ${ENV_FILE_INPUT}"
+      echo "Vim/vi is not installed. Edit this file, then rerun: $0 ${RELEASE_TAG} ${ENV_FILE_INPUT}"
       exit 2
     fi
   else

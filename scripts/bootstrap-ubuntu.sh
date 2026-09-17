@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 readonly AGENT_USER="eagleway-agent"
+readonly AGENT_HOME="/home/${AGENT_USER}"
 readonly INSTALL_ROOT="/opt/eagleway-node-agent"
 readonly CONFIG_ROOT="/etc/eagleway-node-agent"
 readonly STATE_ROOT="/var/lib/eagleway-node-agent"
@@ -193,7 +194,7 @@ chmod -R go-w "${RELEASE_DIR}"
 
 (
   cd "${RELEASE_DIR}"
-  runuser -u "${AGENT_USER}" -- env HOME="/home/${AGENT_USER}" \
+  runuser -u "${AGENT_USER}" -- env HOME="${AGENT_HOME}" \
     /usr/bin/node -e "const Database = require('better-sqlite3'); new Database(':memory:').close()"
 )
 
@@ -223,12 +224,21 @@ chown "${AGENT_USER}:${AGENT_USER}" "${CONFIG_ROOT}/state.key"
 chmod 0600 "${CONFIG_ROOT}/state.key"
 ln -sfn "${CONFIG_ROOT}/agent.env" "${INSTALL_ROOT}/current/.env"
 
-runuser -u "${AGENT_USER}" -- env HOME="/home/${AGENT_USER}" \
-  pm2 delete eagleway-node-agent >/dev/null 2>&1 || true
-runuser -u "${AGENT_USER}" -- env HOME="/home/${AGENT_USER}" \
-  pm2 start "${INSTALL_ROOT}/current/ecosystem.config.cjs"
-runuser -u "${AGENT_USER}" -- env HOME="/home/${AGENT_USER}" pm2 save
-pm2 startup systemd -u "${AGENT_USER}" --hp "/home/${AGENT_USER}" >/dev/null
+(
+  # PM2 passes its current directory to the daemon spawn. A deployment started
+  # from /root would otherwise fail with "spawn /usr/bin/node EACCES" after
+  # dropping privileges to the service user.
+  cd "${AGENT_HOME}"
+  runuser -u "${AGENT_USER}" -- env HOME="${AGENT_HOME}" \
+    pm2 delete eagleway-node-agent >/dev/null 2>&1 || true
+  runuser -u "${AGENT_USER}" -- env HOME="${AGENT_HOME}" \
+    pm2 start "${INSTALL_ROOT}/current/ecosystem.config.cjs"
+  runuser -u "${AGENT_USER}" -- env HOME="${AGENT_HOME}" pm2 save
+)
+(
+  cd /
+  pm2 startup systemd -u "${AGENT_USER}" --hp "${AGENT_HOME}" >/dev/null
+)
 
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
   IFS=',' read -ra CIDRS <<< "${ALLOWED_CIDRS}"

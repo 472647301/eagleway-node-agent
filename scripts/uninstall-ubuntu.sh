@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 readonly AGENT_USER="eagleway-agent"
+readonly AGENT_HOME="/home/${AGENT_USER}"
 readonly INSTALL_ROOT="/opt/eagleway-node-agent"
 readonly CONFIG_ROOT="/etc/eagleway-node-agent"
 readonly STATE_ROOT="/var/lib/eagleway-node-agent"
@@ -101,12 +102,17 @@ ALLOWED_CIDRS="$(env_value ALLOWED_CIDRS || true)"
 
 echo "Stopping Eagleway Node Agent..."
 if id "${AGENT_USER}" >/dev/null 2>&1 && command -v pm2 >/dev/null 2>&1; then
-  runuser -u "${AGENT_USER}" -- env HOME="/home/${AGENT_USER}" \
-    pm2 delete eagleway-node-agent >/dev/null 2>&1 || true
-  runuser -u "${AGENT_USER}" -- env HOME="/home/${AGENT_USER}" \
-    pm2 save --force >/dev/null 2>&1 || true
-  runuser -u "${AGENT_USER}" -- env HOME="/home/${AGENT_USER}" \
-    pm2 kill >/dev/null 2>&1 || true
+  PM2_WORKING_DIRECTORY="${AGENT_HOME}"
+  [[ -d "${PM2_WORKING_DIRECTORY}" ]] || PM2_WORKING_DIRECTORY=/
+  (
+    cd "${PM2_WORKING_DIRECTORY}"
+    runuser -u "${AGENT_USER}" -- env HOME="${AGENT_HOME}" \
+      pm2 delete eagleway-node-agent >/dev/null 2>&1 || true
+    runuser -u "${AGENT_USER}" -- env HOME="${AGENT_HOME}" \
+      pm2 save --force >/dev/null 2>&1 || true
+    runuser -u "${AGENT_USER}" -- env HOME="${AGENT_HOME}" \
+      pm2 kill >/dev/null 2>&1 || true
+  )
 fi
 systemctl disable --now "${PM2_UNIT}" >/dev/null 2>&1 || true
 
