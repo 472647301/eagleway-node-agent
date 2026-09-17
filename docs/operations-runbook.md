@@ -150,8 +150,8 @@ git pull --ff-only
 pnpm verify
 git status --short
 git push origin main
-git tag -a v0.1.0 -m "release: v0.1.0"
-git push origin v0.1.0
+git tag -a v0.1.1 -m "release: v0.1.1"
+git push origin v0.1.1
 ~~~
 
 `git status --short` 应无输出。推送 `v*` tag 后，在以下地址查看构建进度：
@@ -168,7 +168,7 @@ Release workflow 在 `ubuntu-22.04` x64/arm64 runner 上构建对应架构的生
 等待 GitHub Release 中出现 x64 和 arm64 产物后，在 VPS 执行：
 
 ~~~bash
-TAG=v0.1.0
+TAG=v0.1.1
 curl -fsSL "https://raw.githubusercontent.com/472647301/eagleway-node-agent/${TAG}/scripts/deploy-ubuntu-release.sh" -o /tmp/eagleway-deploy.sh
 bash /tmp/eagleway-deploy.sh "${TAG}"
 ~~~
