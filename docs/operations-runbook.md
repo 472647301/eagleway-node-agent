@@ -77,7 +77,7 @@ Node.apiEndpoint 是 Agent 控制地址，例如 http://node-ip:8086；它不是
 - 云安全组按需放行 TCP 80、Agent 控制端口和协议端口。
 - Agent 控制端口只允许中心出口 IP，不得对整个公网开放。
 - 普通 Ubuntu 首次签发证书时需要 TCP 80；已有可复用证书时可跳过签发。
-- 宝塔环境缺少证书时，Agent 会读取目标域名的 Nginx WebRoot 并执行 ACME HTTP-01；`bt` 命令没有稳定的按域名签发接口，Agent 不调用版本相关的菜单编号。
+- 宝塔环境缺少证书时，Agent 会优先复用目标域名站点的 Nginx WebRoot；如果不存在该域名站点，则在宝塔 vhost 目录创建带所有权标记的最小 ACME 站点，再执行 HTTP-01。`bt` 命令没有稳定的按域名签发接口，Agent 不调用版本相关的菜单编号。
 - 目标协议端口不能被其他进程占用。
 - 如果已有非 Eagleway 管理的 /usr/local/bin/xray、Xray unit 或运行时目录，安装会拒绝覆盖。
 
@@ -610,7 +610,7 @@ systemctl is-enabled eagleway-xray.service
 | PORT_IN_USE | ss 检查具体端口 | 更换协议端口或处理占用进程 |
 | 旧版错误只写 Requested protocol port | 同时检查目标端口和 80 | 更新 Agent；无证书时 80 也会被预检 |
 | DNS_NOT_READY | getent/dig 和公网 DNS | 修正 A/AAAA，等待 TTL 生效 |
-| CERTIFICATE_UNAVAILABLE | 宝塔证书路径和有效期 | 先在宝塔签发匹配域名证书 |
+| CERTIFICATE_UNAVAILABLE | 宝塔证书路径、Eagleway ACME vhost、80 端口公网可达性 | 修复证书或 HTTP-01 条件后重试安装 |
 | OPERATION_CONFLICT | status.activeOperation | 等待当前操作结束，不并发修改主机 |
 | RUNTIME_UNAVAILABLE | systemctl、journalctl、Xray 配置 | 修复 Xray 后通过 API start |
 | OPERATION_FAILED | Agent、Xray、Nginx、Certbot 日志 | 检查下载、校验、证书和 helper |
@@ -671,7 +671,7 @@ systemctl status certbot.timer --no-pager
 sudo certbot renew --dry-run
 ~~~
 
-宝塔证书请替换为 /www/server/panel/vhost/cert 下的实际路径。Xray 在启动时加载证书；当前项目没有在证书续期后自动重启 Xray，续期成功后必须在维护窗口重启运行时并验证 TLS，避免进程继续使用旧证书。
+宝塔证书请替换为 /www/server/panel/vhost/cert 下的实际路径。Agent 使用或签发 Certbot 证书时会安装受管 deploy hook；续期成功后，仅当当前 Xray 配置引用该证书 lineage 时才尝试重启运行时。宝塔面板自行管理的证书不经过 Certbot hook，续期成功后仍必须在维护窗口重启 Xray 并验证 TLS，避免进程继续使用旧证书。
 
 当前 bootstrap 也没有安装日志轮转策略。生产环境应由系统 logrotate 管理 /var/log/eagleway-node-agent/*.log，例如：
 

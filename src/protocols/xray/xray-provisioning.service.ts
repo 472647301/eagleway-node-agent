@@ -1,13 +1,25 @@
 import { Inject, Injectable } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { join } from 'node:path'
 import { AgentError } from '@/common/api/agent-error'
 import { APP_CONFIG, type AppConfig } from '@/config/app-config'
 import {
   HostInspectorService,
-  type HostInspection
+  type HostInspection,
+  type HostProfile
 } from '@/host/host-inspector.service'
+import {
+  CERTBOT_XRAY_DEPLOY_HOOK,
+  EAGLEWAY_CERTBOT_HOOK_MARKER
+} from '@/host/certificate-renewal'
+import { EAGLEWAY_NGINX_MARKER, baotaAcmeConfigPath } from '@/host/nginx-acme'
 import { PrivilegedHelperService } from '@/host/privileged-helper.service'
 import { StateStoreService } from '@/state/state-store.service'
 import { XRAY_PROTOCOLS, type XrayProtocol } from './xray.types'
@@ -57,9 +69,7 @@ export class XrayProvisioningService {
   }
 
   async install(input: XrayInstallInput, host: HostInspection): Promise<void> {
-    const createsAcmeConfig =
-      host.profile === 'ubuntu' &&
-      !this.inspector.certificateAvailable(input.domain)
+    const acmeConfigPath = this.acmeConfigCandidate(host.profile, input.domain)
     const planPath = this.writePlan({
       schemaVersion: 1,
       action: 'install',
@@ -83,13 +93,14 @@ export class XrayProvisioningService {
           'runtime-config',
           '/etc/eagleway-node-agent/runtimes/xray/config.json'
         ],
-        ...(createsAcmeConfig
-          ? ([
-              [
-                'nginx-config',
-                `/etc/nginx/conf.d/eagleway-acme-${input.domain}.conf`
-              ]
-            ] as string[][])
+        ...(isManagedFile(
+          CERTBOT_XRAY_DEPLOY_HOOK,
+          EAGLEWAY_CERTBOT_HOOK_MARKER
+        )
+          ? ([['certbot-hook', CERTBOT_XRAY_DEPLOY_HOOK]] as string[][])
+          : []),
+        ...(acmeConfigPath && isManagedNginxConfig(acmeConfigPath)
+          ? ([['nginx-config', acmeConfigPath]] as string[][])
           : [])
       ]
       for (const [resourceType, resourceName] of resources) {
@@ -112,9 +123,7 @@ export class XrayProvisioningService {
     input: XrayInstallInput,
     host: HostInspection
   ): Promise<void> {
-    const createsAcmeConfig =
-      host.profile === 'ubuntu' &&
-      !this.inspector.certificateAvailable(input.domain)
+    const acmeConfigPath = this.acmeConfigCandidate(host.profile, input.domain)
     const planPath = this.writePlan({
       schemaVersion: 1,
       action: 'apply-config',
@@ -131,10 +140,21 @@ export class XrayProvisioningService {
     })
     try {
       await this.helper.run('xray-apply-config', planPath)
-      if (createsAcmeConfig) {
+      if (acmeConfigPath && isManagedNginxConfig(acmeConfigPath)) {
         this.state.registerOwnedResource({
           resourceType: 'nginx-config',
-          resourceName: `/etc/nginx/conf.d/eagleway-acme-${input.domain}.conf`,
+          resourceName: acmeConfigPath,
+          ownershipTag: 'eagleway-node-agent:xray',
+          createdAt: new Date().toISOString(),
+          removedAt: null
+        })
+      }
+      if (
+        isManagedFile(CERTBOT_XRAY_DEPLOY_HOOK, EAGLEWAY_CERTBOT_HOOK_MARKER)
+      ) {
+        this.state.registerOwnedResource({
+          resourceType: 'certbot-hook',
+          resourceName: CERTBOT_XRAY_DEPLOY_HOOK,
           ownershipTag: 'eagleway-node-agent:xray',
           createdAt: new Date().toISOString(),
           removedAt: null
@@ -166,12 +186,34 @@ export class XrayProvisioningService {
     return this.helper.run('xray-stop')
   }
 
+  private acmeConfigCandidate(
+    hostProfile: HostProfile,
+    domain: string
+  ): string | null {
+    if (this.inspector.certificateAvailable(domain)) return null
+    return hostProfile === 'ubuntu-baota'
+      ? baotaAcmeConfigPath(domain)
+      : `/etc/nginx/conf.d/eagleway-acme-${domain}.conf`
+  }
+
   private writePlan(value: object): string {
     const directory = join(this.config.stateDir, 'staging')
     mkdirSync(directory, { recursive: true, mode: 0o700 })
     const path = join(directory, `install-${randomUUID()}.json`)
     writeFileSync(path, JSON.stringify(value), { mode: 0o600, flag: 'wx' })
     return path
+  }
+}
+
+function isManagedNginxConfig(path: string): boolean {
+  return isManagedFile(path, EAGLEWAY_NGINX_MARKER)
+}
+
+function isManagedFile(path: string, marker: string): boolean {
+  try {
+    return existsSync(path) && readFileSync(path, 'utf8').startsWith(marker)
+  } catch {
+    return false
   }
 }
 

@@ -26,6 +26,20 @@ import {
 } from 'node:fs'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process'
+import {
+  CERTBOT_XRAY_DEPLOY_HOOK,
+  EAGLEWAY_CERTBOT_HOOK_MARKER,
+  certbotXrayDeployHook
+} from './host/certificate-renewal'
+import {
+  BAOTA_NGINX_BINARY,
+  BAOTA_NGINX_VHOST_DIRECTORY,
+  EAGLEWAY_NGINX_MARKER,
+  baotaAcmeConfigPath,
+  baotaAcmeNginxConfig,
+  baotaAcmeWebroot,
+  inspectNginxDomain
+} from './host/nginx-acme'
 
 const stateDir = resolve(
   process.env.STATE_DIR || '/var/lib/eagleway-node-agent'
@@ -42,7 +56,6 @@ const runtimeLogPaths = [
   join(runtimeLogDir, 'xray-access.log'),
   join(runtimeLogDir, 'xray-error.log')
 ]
-const nginxMarker = '# Managed by eagleway-node-agent\n'
 const xrayRelease = {
   version: 'v26.3.27',
   assets: {
@@ -226,19 +239,40 @@ function uninstall(): void {
   )
   safeRemove(unitPath)
   safeRemove(runtimeBinary)
-  for (const directory of ['/etc/nginx/conf.d']) {
+  if (
+    existsSync(CERTBOT_XRAY_DEPLOY_HOOK) &&
+    readFileSync(CERTBOT_XRAY_DEPLOY_HOOK, 'utf8').startsWith(
+      EAGLEWAY_CERTBOT_HOOK_MARKER
+    )
+  ) {
+    safeRemove(CERTBOT_XRAY_DEPLOY_HOOK)
+  }
+  let standardNginxChanged = false
+  let baotaNginxChanged = false
+  for (const directory of ['/etc/nginx/conf.d', BAOTA_NGINX_VHOST_DIRECTORY]) {
     if (!existsSync(directory)) continue
     for (const name of readdirSync(directory)) {
       if (/^eagleway-acme-[A-Za-z0-9.-]+\.conf$/.test(name)) {
         const path = join(directory, name)
-        if (readFileSync(path, 'utf8').startsWith(nginxMarker)) safeRemove(path)
+        if (readFileSync(path, 'utf8').startsWith(EAGLEWAY_NGINX_MARKER)) {
+          safeRemove(path)
+          if (directory === BAOTA_NGINX_VHOST_DIRECTORY) {
+            baotaNginxChanged = true
+          } else {
+            standardNginxChanged = true
+          }
+        }
       }
     }
   }
   systemctl('daemon-reload')
-  if (existsSync('/usr/sbin/nginx')) {
+  if (standardNginxChanged && existsSync('/usr/sbin/nginx')) {
     run('/usr/sbin/nginx', ['-t'], false)
     run('/usr/bin/systemctl', ['reload', 'nginx'], false)
+  }
+  if (baotaNginxChanged && existsSync(BAOTA_NGINX_BINARY)) {
+    run(BAOTA_NGINX_BINARY, ['-t'], false)
+    run(BAOTA_NGINX_BINARY, ['-s', 'reload'], false)
   }
   rmSync(runtimeDir, { recursive: true, force: true })
 }
@@ -259,6 +293,7 @@ function ensureCertificate(plan: InstallPlan): { cert: string; key: string } {
   )
   if (existing) {
     validateCertificate(existing, plan.domain)
+    if (existing === candidates[1]) ensureCertbotDeployHook()
     return existing
   }
 
@@ -282,14 +317,14 @@ function ensureCertificate(plan: InstallPlan): { cert: string; key: string } {
   }
   const webroot =
     plan.hostProfile === 'ubuntu-baota'
-      ? baotaWebroot(plan.domain)
+      ? ensureBaotaAcmeWebroot(plan.domain)
       : '/var/www/eagleway-acme'
   mkdirSync(webroot, { recursive: true, mode: 0o755 })
   const nginxPath = `/etc/nginx/conf.d/eagleway-acme-${plan.domain}.conf`
   if (plan.hostProfile === 'ubuntu') {
     if (
       existsSync(nginxPath) &&
-      !readFileSync(nginxPath, 'utf8').startsWith(nginxMarker)
+      !readFileSync(nginxPath, 'utf8').startsWith(EAGLEWAY_NGINX_MARKER)
     ) {
       fail('Existing Nginx configuration is not owned by Eagleway')
     }
@@ -320,43 +355,92 @@ function ensureCertificate(plan: InstallPlan): { cert: string; key: string } {
     fail('Certificate issuance did not create expected files')
   }
   validateCertificate(issued, plan.domain)
+  ensureCertbotDeployHook()
   return issued
 }
 
-function baotaWebroot(domain: string): string {
-  const directory = '/www/server/panel/vhost/nginx'
+function ensureCertbotDeployHook(): void {
+  if (
+    existsSync(CERTBOT_XRAY_DEPLOY_HOOK) &&
+    !readFileSync(CERTBOT_XRAY_DEPLOY_HOOK, 'utf8').startsWith(
+      EAGLEWAY_CERTBOT_HOOK_MARKER
+    )
+  ) {
+    fail('Existing Certbot deploy hook is not owned by Eagleway')
+  }
+  atomicWrite(CERTBOT_XRAY_DEPLOY_HOOK, certbotXrayDeployHook(), 0o755)
+}
+
+function ensureBaotaAcmeWebroot(domain: string): string {
+  const directory = BAOTA_NGINX_VHOST_DIRECTORY
   if (!existsSync(directory)) {
     fail('BaoTa Nginx vhost directory is unavailable')
   }
-  const domainPattern = new RegExp(`(?:^|\\s)${escapeRegExp(domain)}(?:\\s|$)`)
+  const configPath = baotaAcmeConfigPath(domain)
+  let matchingSite = false
+  let managedConfigMatches = false
   for (const name of readdirSync(directory)) {
     if (!name.endsWith('.conf')) continue
     const path = join(directory, name)
     const content = readFileSync(path, 'utf8')
-    if (!/\bserver_name\s+[^;]*;/.test(content)) continue
-    if (
-      !content.split(/\bserver\s*\{/).some((block) => {
-        return domainPattern.test(
-          block.match(/\bserver_name\s+([^;]+);/)?.[1] ?? ''
-        )
-      })
+    const inspection = inspectNginxDomain(content, domain)
+    if (!inspection.matchesDomain) continue
+    matchingSite = true
+    if (path === configPath && content.startsWith(EAGLEWAY_NGINX_MARKER)) {
+      managedConfigMatches = true
+    }
+    const root = inspection.webroots.find(
+      (candidate) => existsSync(candidate) && statSync(candidate).isDirectory()
     )
-      continue
-    const root = content.match(/\broot\s+([^;{}]+);/)?.[1]?.trim()
-    if (root && existsSync(root) && statSync(root).isDirectory()) return root
+    if (root) return root
   }
-  fail(`BaoTa Nginx site root was not found for ${domain}`)
+  if (matchingSite && !managedConfigMatches) {
+    fail(`BaoTa Nginx site root is unavailable for ${domain}`)
+  }
+
+  const webroot = baotaAcmeWebroot(domain)
+  const previousConfig = existsSync(configPath)
+    ? readFileSync(configPath, 'utf8')
+    : null
+  if (previousConfig && !previousConfig.startsWith(EAGLEWAY_NGINX_MARKER)) {
+    fail('Existing BaoTa Nginx configuration is not owned by Eagleway')
+  }
+  if (!existsSync(BAOTA_NGINX_BINARY)) {
+    fail('BaoTa Nginx binary is unavailable')
+  }
+  mkdirSync(webroot, { recursive: true, mode: 0o755 })
+  atomicWrite(configPath, baotaAcmeNginxConfig(domain, webroot), 0o644)
+  const validation = run(BAOTA_NGINX_BINARY, ['-t'], false)
+  if (validation.error || validation.status !== 0) {
+    restoreManagedNginxConfig(configPath, previousConfig)
+    fail('BaoTa Nginx configuration validation failed')
+  }
+  const reload = run(BAOTA_NGINX_BINARY, ['-s', 'reload'], false)
+  if (reload.error || reload.status !== 0) {
+    restoreManagedNginxConfig(configPath, previousConfig)
+    run(BAOTA_NGINX_BINARY, ['-t'], false)
+    run(BAOTA_NGINX_BINARY, ['-s', 'reload'], false)
+    fail('BaoTa Nginx reload failed')
+  }
+  return webroot
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+function restoreManagedNginxConfig(
+  path: string,
+  previousConfig: string | null
+): void {
+  if (previousConfig === null) {
+    safeRemove(path)
+  } else {
+    atomicWrite(path, previousConfig, 0o644)
+  }
 }
 
 function nginxConfig(plan: InstallPlan, webroot: string): string {
   const upstream = plan.proxyUrl
     ? `    proxy_set_header Host $host;\n    proxy_ssl_server_name on;\n    proxy_pass ${plan.proxyUrl};`
     : '    root /var/www/html;\n    try_files $uri $uri/ =404;'
-  return `${nginxMarker}server {
+  return `${EAGLEWAY_NGINX_MARKER}server {
   listen 80;
   listen [::]:80;
   server_name ${plan.domain};

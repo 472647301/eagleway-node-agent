@@ -3,6 +3,7 @@ import { promises as dns } from 'node:dns'
 import { existsSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { AgentError } from '@/common/api/agent-error'
+import { BAOTA_NGINX_BINARY } from './nginx-acme'
 
 export type HostProfile = 'ubuntu' | 'ubuntu-baota'
 
@@ -42,7 +43,10 @@ export class HostInspectorService {
       )
     }
     const baota = existsSync('/www/server/panel')
-    if (baota && !existsSync('/www/server/nginx')) {
+    if (
+      baota &&
+      (!existsSync('/www/server/nginx') || !existsSync(BAOTA_NGINX_BINARY))
+    ) {
       throw new AgentError(
         'UNSUPPORTED_HOST_PROFILE',
         'Only BaoTa with Nginx is supported',

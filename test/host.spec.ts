@@ -6,6 +6,17 @@ import {
   portAvailable,
   tcpTableHasListeningPort
 } from '@/host/host-inspector.service'
+import {
+  EAGLEWAY_CERTBOT_HOOK_MARKER,
+  certbotXrayDeployHook
+} from '@/host/certificate-renewal'
+import {
+  EAGLEWAY_NGINX_MARKER,
+  baotaAcmeConfigPath,
+  baotaAcmeNginxConfig,
+  baotaAcmeWebroot,
+  inspectNginxDomain
+} from '@/host/nginx-acme'
 
 test('Ubuntu os-release parser handles quoted values', () => {
   assert.deepEqual(
@@ -37,4 +48,62 @@ test('Linux TCP table parser only recognizes listening ports', () => {
   ].join('\n')
   assert.equal(tcpTableHasListeningPort(table, 80), true)
   assert.equal(tcpTableHasListeningPort(table, 9443), false)
+})
+
+test('BaoTa Nginx parser finds an exact domain and quoted webroot', () => {
+  const inspection = inspectNginxDomain(
+    `server {
+      server_name unrelated.example.com;
+      root /www/wwwroot/unrelated;
+    }
+    server {
+      server_name node.example.com www.node.example.com;
+      root "/www/wwwroot/node";
+    }`,
+    'node.example.com'
+  )
+
+  assert.deepEqual(inspection, {
+    matchesDomain: true,
+    webroots: ['/www/wwwroot/node']
+  })
+})
+
+test('BaoTa Nginx parser does not treat comments as active directives', () => {
+  assert.deepEqual(
+    inspectNginxDomain(
+      `server {
+        # server_name node.example.com;
+        server_name other.example.com;
+        root /www/wwwroot/other;
+      }`,
+      'node.example.com'
+    ),
+    { matchesDomain: false, webroots: [] }
+  )
+})
+
+test('BaoTa ACME fallback uses an owned isolated vhost and webroot', () => {
+  const domain = 'node.example.com'
+  const webroot = baotaAcmeWebroot(domain)
+  const config = baotaAcmeNginxConfig(domain, webroot)
+
+  assert.equal(
+    baotaAcmeConfigPath(domain),
+    '/www/server/panel/vhost/nginx/eagleway-acme-node.example.com.conf'
+  )
+  assert.ok(config.startsWith(EAGLEWAY_NGINX_MARKER))
+  assert.match(config, /server_name node\.example\.com;/)
+  assert.match(config, /location \^~ \/\.well-known\/acme-challenge\//)
+  assert.match(config, /root \/var\/www\/eagleway-acme\/node\.example\.com;/)
+  assert.match(config, /location \/ \{\s+return 404;/)
+})
+
+test('Certbot deploy hook only restarts Xray for its active certificate', () => {
+  const hook = certbotXrayDeployHook()
+
+  assert.ok(hook.startsWith(EAGLEWAY_CERTBOT_HOOK_MARKER))
+  assert.match(hook, /RENEWED_LINEAGE/)
+  assert.match(hook, /certificateFile/)
+  assert.match(hook, /systemctl try-restart eagleway-xray\.service/)
 })
