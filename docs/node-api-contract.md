@@ -273,7 +273,6 @@ Agent 不返回 offline。中心请求超时或连接失败时，由中心将节
 {
   "reportedAt": "2026-09-04T01:05:00.000Z",
   "runtimeEpoch": "6f01dc9dc1294fd3a463f521cb24f1ee",
-  "bandwidthMbps": 1000,
   "managedUserCount": 2,
   "users": [
     {
@@ -286,7 +285,7 @@ Agent 不返回 offline。中心请求超时或连接失败时，由中心将节
 ```
 
 - `runtimeEpoch` 是 `eagleway-xray.service` 的 systemd InvocationID。
-- `bandwidthMbps` 是 VPS 本机显式配置的线路带宽，不由中心后台填写。
+- 服务器带宽由中心 API 自行维护，不属于 Agent 流量响应。
 - `managedUserCount` 是 Xray HandlerService 返回的目标入站实际用户条目数，不是中心数据库计数，也不是在线连接数。
 - `users` 只包含 email 符合受管格式且能严格解析出 UUID assignmentId 的实际运行时用户。
 
@@ -325,7 +324,7 @@ Agent 调用：
 
 `POST {CENTER_API}/api/v1/node/traffic-report`
 
-Body 与流量查询 data 一致，但不包含 nodeId。中心反向代理覆盖来源 IP Header，并按 `nodes.reportSourceIp` 匹配节点。中心仅通过该接口写入服务器带宽、运行时用户数和流量快照。
+Body 与流量查询 data 一致，但不包含 nodeId。中心反向代理覆盖来源 IP Header，并按 `nodes.reportSourceIp` 匹配节点。中心通过该接口写入运行时用户数和流量快照；服务器带宽由中心自己的节点配置维护，不从 Agent 上报 Body 读取。
 
 上报规则：
 

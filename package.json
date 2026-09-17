@@ -4,6 +4,16 @@
   "description": "Eagleway managed network node agent",
   "private": true,
   "license": "UNLICENSED",
+  "files": [
+    ".env.example",
+    "dist",
+    "ecosystem.config.cjs",
+    "scripts/bootstrap-ubuntu.sh",
+    "scripts/deploy-ubuntu-release.sh",
+    "scripts/uninstall-ubuntu.sh",
+    "scripts/eagleway-node-agent.sudoers",
+    "scripts/eagleway-node-helper"
+  ],
   "engines": {
     "node": ">=22.0.0"
   },

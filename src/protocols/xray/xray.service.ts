@@ -318,12 +318,7 @@ export class XrayService {
   }
 
   trafficReport(protocol: XrayProtocol) {
-    return this.assignments
-      .traffic(protocol, this.state.nextReportedAt())
-      .then((report) => ({
-        ...report,
-        bandwidthMbps: this.config.serverBandwidthMbps
-      }))
+    return this.assignments.traffic(protocol, this.state.nextReportedAt())
   }
 
   getInstalledProtocol(): XrayProtocol | null {

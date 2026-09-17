@@ -42,14 +42,11 @@ test('configuration rejects malformed CIDR entries', () => {
   )
 })
 
-test('production configuration requires VPS bandwidth', () => {
-  assert.throws(
-    () =>
-      loadAppConfig({
-        NODE_ENV: 'production',
-        NODE_ID: '1',
-        REPORTING_ENABLED: 'false'
-      }),
-    /SERVER_BANDWIDTH_MBPS/
-  )
+test('production configuration does not require local bandwidth', () => {
+  const config = loadAppConfig({
+    NODE_ENV: 'production',
+    NODE_ID: '1',
+    REPORTING_ENABLED: 'false'
+  })
+  assert.equal(config.env, 'production')
 })

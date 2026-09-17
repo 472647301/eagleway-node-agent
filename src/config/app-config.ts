@@ -12,7 +12,6 @@ export interface AppConfig {
   centerApiUrl: string | null
   reportIntervalSeconds: number
   reportingEnabled: boolean
-  serverBandwidthMbps: number
   stateDir: string
   stateKeyPath: string
   logDir: string
@@ -62,13 +61,6 @@ export function loadAppConfig(env = process.env): AppConfig {
       'REPORT_INTERVAL_SECONDS'
     ),
     reportingEnabled,
-    serverBandwidthMbps: boundedInteger(
-      env.SERVER_BANDWIDTH_MBPS,
-      runtimeEnv === 'production' ? NaN : 1000,
-      1,
-      1_000_000,
-      'SERVER_BANDWIDTH_MBPS'
-    ),
     stateDir,
     stateKeyPath: resolve(
       env.STATE_KEY_PATH ??

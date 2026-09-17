@@ -14,16 +14,19 @@ run_apt_get() {
 }
 
 usage() {
-  echo "Usage: sudo $0 [source-directory]" >&2
+  echo "Usage: sudo $0 [release-directory] [env-file]" >&2
   exit 2
 }
 
 [[ "${EUID}" -eq 0 ]] || { echo "Bootstrap must run as root" >&2; exit 1; }
-[[ $# -le 1 ]] || usage
+[[ $# -le 2 ]] || usage
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-SOURCE_DIR="$(realpath "${1:-${SCRIPT_DIR}/..}")"
-ENV_FILE="${SOURCE_DIR}/.env"
+RELEASE_SOURCE_DIR="$(realpath "${1:-${SCRIPT_DIR}/..}")"
+ENV_FILE_INPUT="${2:-${RELEASE_SOURCE_DIR}/.env}"
+[[ -f "${ENV_FILE_INPUT}" ]] || { echo "Missing environment file: ${ENV_FILE_INPUT}" >&2; exit 1; }
+ENV_FILE="$(realpath "${ENV_FILE_INPUT}")"
+RELEASE_MANIFEST="${RELEASE_SOURCE_DIR}/release-manifest.json"
 
 env_value() {
   local key="$1"
@@ -71,29 +74,31 @@ assert_fixed_env() {
   fi
 }
 
-[[ -f "${ENV_FILE}" ]] || { echo "Missing environment file: ${ENV_FILE}" >&2; exit 1; }
-
 RUNTIME_ENV="$(required_env NODE_ENV)"
 AGENT_PORT="$(required_env PORT)"
 NODE_ID="$(required_env NODE_ID)"
 ALLOWED_CIDRS="$(required_env ALLOWED_CIDRS)"
 REPORTING_ENABLED="$(required_env REPORTING_ENABLED)"
-SERVER_BANDWIDTH_MBPS="$(required_env SERVER_BANDWIDTH_MBPS)"
 CENTER_API_URL="$(env_value CENTER_API_URL || true)"
 
 [[ -f /etc/os-release ]] || { echo "Missing /etc/os-release" >&2; exit 1; }
 . /etc/os-release
 [[ "${ID:-}" == "ubuntu" ]] || { echo "Only Ubuntu is supported" >&2; exit 1; }
-[[ -f "${SOURCE_DIR}/package.json" && -f "${SOURCE_DIR}/pnpm-lock.yaml" ]] || {
-  echo "Source directory is not an Eagleway Node Agent checkout" >&2
+[[ -f "${RELEASE_MANIFEST}" \
+  && -f "${RELEASE_SOURCE_DIR}/package.json" \
+  && -f "${RELEASE_SOURCE_DIR}/dist/main.js" \
+  && -f "${RELEASE_SOURCE_DIR}/dist/helper.js" \
+  && -f "${RELEASE_SOURCE_DIR}/ecosystem.config.cjs" \
+  && -f "${RELEASE_SOURCE_DIR}/scripts/deploy-ubuntu-release.sh" \
+  && -f "${RELEASE_SOURCE_DIR}/scripts/uninstall-ubuntu.sh" \
+  && -f "${RELEASE_SOURCE_DIR}/scripts/eagleway-node-helper" \
+  && -f "${RELEASE_SOURCE_DIR}/scripts/eagleway-node-agent.sudoers" \
+  && -d "${RELEASE_SOURCE_DIR}/node_modules" ]] || {
+  echo "Release directory is incomplete; use a CI-built Eagleway release artifact" >&2
   exit 1
 }
 [[ "${RUNTIME_ENV}" == "production" ]] || { echo "NODE_ENV must be production" >&2; exit 1; }
 [[ "${NODE_ID}" =~ ^[1-9][0-9]*$ ]] || { echo "NODE_ID is invalid" >&2; exit 1; }
-[[ "${SERVER_BANDWIDTH_MBPS}" =~ ^[1-9][0-9]*$ ]] || {
-  echo "SERVER_BANDWIDTH_MBPS is invalid" >&2
-  exit 1
-}
 [[ "${AGENT_PORT}" =~ ^[0-9]+$ ]] && (( AGENT_PORT >= 1 && AGENT_PORT <= 65535 )) || {
   echo "PORT is invalid" >&2
   exit 1
@@ -114,7 +119,7 @@ assert_fixed_env PRIVILEGED_HELPER /usr/local/libexec/eagleway-node-helper
 
 export DEBIAN_FRONTEND=noninteractive
 run_apt_get update
-run_apt_get install -y --no-install-recommends ca-certificates curl gnupg rsync sudo unzip build-essential python3
+run_apt_get install -y --no-install-recommends ca-certificates curl gnupg rsync sudo unzip
 
 NODE_MAJOR=0
 if command -v node >/dev/null 2>&1; then
@@ -134,9 +139,36 @@ if (( NODE_MAJOR < 22 )); then
 fi
 
 node -e "if (Number(process.versions.node.split('.')[0]) < 22) process.exit(1)"
-corepack enable
-corepack prepare pnpm@11.22.0 --activate
-npm install --global pm2@6
+[[ -x /usr/bin/node ]] || {
+  echo "Node.js 22 must be available at /usr/bin/node" >&2
+  exit 1
+}
+
+RELEASE_COMMIT="$(RELEASE_MANIFEST="${RELEASE_MANIFEST}" node -e '
+  const fs = require("node:fs")
+  const manifest = JSON.parse(fs.readFileSync(process.env.RELEASE_MANIFEST, "utf8"))
+  const nodeMajor = Number(process.versions.node.split(".")[0])
+  if (manifest.formatVersion !== 1) throw new Error("Unsupported release manifest format")
+  if (manifest.packageName !== "@eagleway/node-agent") throw new Error("Unexpected package name")
+  if (manifest.platform !== process.platform) throw new Error(`Release platform ${manifest.platform} does not match ${process.platform}`)
+  if (manifest.arch !== process.arch) throw new Error(`Release architecture ${manifest.arch} does not match ${process.arch}`)
+  if (manifest.nodeMajor !== nodeMajor) throw new Error(`Release Node.js ${manifest.nodeMajor} does not match ${nodeMajor}`)
+  if (!/^[0-9a-f]{40}$/.test(manifest.commit)) throw new Error("Invalid release commit")
+  process.stdout.write(manifest.commit)
+')"
+
+PM2_MAJOR=0
+if command -v pm2 >/dev/null 2>&1; then
+  PM2_ENTRY="$(readlink -f "$(command -v pm2)")"
+  PM2_PACKAGE_JSON="$(dirname "$(dirname "${PM2_ENTRY}")")/package.json"
+  if [[ -f "${PM2_PACKAGE_JSON}" ]]; then
+    PM2_MAJOR="$(PM2_PACKAGE_JSON="${PM2_PACKAGE_JSON}" node -p \
+      'require(process.env.PM2_PACKAGE_JSON).version.split(".")[0]')"
+  fi
+fi
+if [[ ! "${PM2_MAJOR}" =~ ^[0-9]+$ ]] || (( PM2_MAJOR < 6 )); then
+  npm install --global pm2@6
+fi
 
 if ! id "${AGENT_USER}" >/dev/null 2>&1; then
   useradd --create-home --shell /usr/sbin/nologin "${AGENT_USER}"
@@ -147,29 +179,29 @@ install -d -o root -g "${AGENT_USER}" -m 0750 "${CONFIG_ROOT}"
 install -d -o "${AGENT_USER}" -g "${AGENT_USER}" -m 0700 "${STATE_ROOT}"
 install -d -o "${AGENT_USER}" -g "${AGENT_USER}" -m 0750 "${LOG_ROOT}"
 
-RELEASE_ID="$(date -u +%Y%m%d%H%M%S)"
+RELEASE_ID="$(date -u +%Y%m%d%H%M%S)-${RELEASE_COMMIT:0:12}"
 RELEASE_DIR="${INSTALL_ROOT}/releases/${RELEASE_ID}"
-install -d -o "${AGENT_USER}" -g "${AGENT_USER}" -m 0755 "${RELEASE_DIR}"
-rsync -a --delete \
-  --exclude .git \
-  --exclude .env \
-  --exclude node_modules \
-  --exclude dist \
-  --exclude var \
-  "${SOURCE_DIR}/" "${RELEASE_DIR}/"
-chown -R "${AGENT_USER}:${AGENT_USER}" "${RELEASE_DIR}"
+install -d -o root -g root -m 0755 "${RELEASE_DIR}"
+RSYNC_EXCLUDES=(--exclude=/.env)
+if [[ "${ENV_FILE}" == "${RELEASE_SOURCE_DIR}/"* ]]; then
+  RSYNC_EXCLUDES+=(--exclude="/${ENV_FILE#"${RELEASE_SOURCE_DIR}/"}")
+fi
+rsync -a --delete "${RSYNC_EXCLUDES[@]}" \
+  "${RELEASE_SOURCE_DIR}/" "${RELEASE_DIR}/"
+chown -R root:root "${RELEASE_DIR}"
+chmod -R go-w "${RELEASE_DIR}"
 
-runuser -u "${AGENT_USER}" -- bash -lc \
-  "cd '${RELEASE_DIR}' && pnpm install --frozen-lockfile && pnpm build && pnpm prune --prod"
+(
+  cd "${RELEASE_DIR}"
+  runuser -u "${AGENT_USER}" -- env HOME="/home/${AGENT_USER}" \
+    /usr/bin/node -e "const Database = require('better-sqlite3'); new Database(':memory:').close()"
+)
 
 (
   cd "${RELEASE_DIR}"
   env -i PATH="${PATH}" DOTENV_CONFIG_PATH="${ENV_FILE}" \
     /usr/bin/node -e "require('./dist/config/app-config').loadAppConfig()"
 )
-
-chown -R root:root "${RELEASE_DIR}"
-chmod -R go-w "${RELEASE_DIR}"
 
 ln -sfn "${RELEASE_DIR}" "${INSTALL_ROOT}/current"
 install -d -o root -g root -m 0755 /usr/local/libexec

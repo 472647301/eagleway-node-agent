@@ -1,0 +1,140 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package linux-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.22.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify
+
+      - name: Build production release
+        env:
+          RELEASE_ARCH: ${{ matrix.arch }}
+          RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_REF: ${{ github.ref_name }}
+        run: |
+          set -Eeuo pipefail
+          test "$(node -p 'process.arch')" = "${RELEASE_ARCH}"
+
+          package_root="${RUNNER_TEMP}/eagleway-package"
+          release_dir="${package_root}/eagleway-node-agent"
+          output_dir="${GITHUB_WORKSPACE}/artifacts"
+          archive_name="eagleway-node-agent-linux-${RELEASE_ARCH}.tar.gz"
+
+          rm -rf "${package_root}" "${output_dir}"
+          mkdir -p "${package_root}" "${output_dir}"
+          pnpm --filter @eagleway/node-agent --prod deploy --legacy "${release_dir}"
+
+          RELEASE_DIR="${release_dir}" node <<'NODE'
+          const { writeFileSync } = require('node:fs')
+          const { join } = require('node:path')
+
+          const manifest = {
+            formatVersion: 1,
+            packageName: '@eagleway/node-agent',
+            packageVersion: require(join(process.env.RELEASE_DIR, 'package.json')).version,
+            commit: process.env.RELEASE_COMMIT,
+            sourceRef: process.env.RELEASE_REF,
+            platform: process.platform,
+            arch: process.arch,
+            nodeMajor: Number(process.versions.node.split('.')[0]),
+            builtAt: new Date().toISOString()
+          }
+          writeFileSync(
+            join(process.env.RELEASE_DIR, 'release-manifest.json'),
+            `${JSON.stringify(manifest, null, 2)}\n`
+          )
+          NODE
+
+          test -f "${release_dir}/dist/main.js"
+          test -f "${release_dir}/dist/helper.js"
+          test -f "${release_dir}/.env.example"
+          test -x "${release_dir}/scripts/bootstrap-ubuntu.sh"
+          test -f "${release_dir}/scripts/deploy-ubuntu-release.sh"
+          test -f "${release_dir}/scripts/uninstall-ubuntu.sh"
+          test -x "${release_dir}/scripts/eagleway-node-helper"
+          test -f "${release_dir}/scripts/eagleway-node-agent.sudoers"
+          test -f "${release_dir}/ecosystem.config.cjs"
+          test -d "${release_dir}/node_modules"
+          test ! -e "${release_dir}/node_modules/typescript"
+          test ! -e "${release_dir}/node_modules/@nestjs/cli"
+          if find "${release_dir}" -type l -lname '/*' -print -quit | grep -q .; then
+            echo "Release contains an absolute symlink" >&2
+            exit 1
+          fi
+          (
+            cd "${release_dir}"
+            node -e "const Database = require('better-sqlite3'); new Database(':memory:').close()"
+          )
+
+          tar \
+            --sort=name \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            -C "${release_dir}" \
+            -czf "${output_dir}/${archive_name}" \
+            .
+          (
+            cd "${output_dir}"
+            sha256sum "${archive_name}" > "${archive_name}.sha256"
+          )
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eagleway-node-agent-linux-${{ matrix.arch }}
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: eagleway-node-agent-linux-*
+          path: artifacts
+          merge-multiple: true
+      - name: Publish release assets
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -Eeuo pipefail
+          gh release view "${RELEASE_TAG}" >/dev/null 2>&1 || \
+            gh release create "${RELEASE_TAG}" --verify-tag --generate-notes
+          gh release upload "${RELEASE_TAG}" artifacts/* --clobber

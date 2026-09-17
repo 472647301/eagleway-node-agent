@@ -75,7 +75,6 @@ function fixtureConfig(directory: string): AppConfig {
     centerApiUrl: null,
     reportIntervalSeconds: 300,
     reportingEnabled: false,
-    serverBandwidthMbps: 1000,
     stateDir: directory,
     stateKeyPath: join(directory, 'state.key'),
     logDir: join(directory, 'logs'),

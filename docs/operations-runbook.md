@@ -70,7 +70,7 @@ Node.apiEndpoint 是 Agent 控制地址，例如 http://node-ip:8086；它不是
 
 ### 3.2 VPS 和网络
 
-- Ubuntu x64 或 arm64，systemd 正常运行。
+- Ubuntu 22.04 或 24.04，x64 或 arm64，systemd 正常运行。
 - root 或 sudo 权限。
 - 能访问系统 apt 源、npm 源和 XTLS GitHub Release。
 - 域名具有 A 或 AAAA 记录。
@@ -95,15 +95,7 @@ sudo ss -ltnp 'sport = :9443'
 
 ## 4. 配置 .env
 
-Bootstrap 默认读取源码仓库根目录的 .env，并把验证后的文件安装到 /etc/eagleway-node-agent/agent.env。它不会以 root 身份 source .env，也不会把 .env 复制进 release。
-
-首次部署：
-
-~~~bash
-cd /home/eagleway-node-agent
-cp .env.example .env
-nano .env
-~~~
+Bootstrap 接受独立 env 文件路径，并把验证后的文件安装到 /etc/eagleway-node-agent/agent.env。它不会以 root 身份 source env 文件，也不会把该文件复制进 release。便捷部署脚本默认长期维护 `~/.config/eagleway-node-agent/agent.env`，首次运行时会自动创建并打开该文件。
 
 最小的独立自测配置：
 
@@ -117,7 +109,6 @@ TRUST_PROXY=false
 CENTER_API_URL=
 REPORT_INTERVAL_SECONDS=300
 REPORTING_ENABLED=false
-SERVER_BANDWIDTH_MBPS=1000
 STATE_DIR=/var/lib/eagleway-node-agent
 STATE_KEY_PATH=/etc/eagleway-node-agent/state.key
 LOG_DIR=/var/log/eagleway-node-agent
@@ -138,29 +129,53 @@ REPORTING_ENABLED=true
 
 说明：
 
-- NODE_ID、PORT、ALLOWED_CIDRS、REPORTING_ENABLED 和 SERVER_BANDWIDTH_MBPS 是 bootstrap 必填项。
+- NODE_ID、PORT、ALLOWED_CIDRS 和 REPORTING_ENABLED 是 bootstrap 必填项。
 - REPORTING_ENABLED=true 时 CENTER_API_URL 必填。
+- 服务器带宽由中心 API 自行维护，不写入 Agent 配置，也不由 Agent 上报。
 - 必须保留 127.0.0.1/32，才能在服务器本机执行本文的 curl 自测。
 - STATE_DIR、STATE_KEY_PATH、LOG_DIR、XRAY_BINARY 和 PRIVILEGED_HELPER 如果显式配置，必须使用项目固定路径。
-- 修改 /etc 下的运行配置只能作为应急操作；下次 bootstrap 会用源码目录 .env 覆盖它，因此最终修改必须回写源码目录 .env。
+- 修改 /etc 下的运行配置只能作为应急操作；下次 bootstrap 会用传入的 env 文件覆盖它，因此最终修改必须回写长期维护的 env 文件。
 - 中心出口 IP 变化时，先追加新 CIDR并验证，再删除旧 CIDR。
 - Bootstrap 只新增当前 CIDR 对应的 UFW allow 规则，不会自动删除历史规则；确认新来源可用后需要人工清理旧规则。
 
-## 5. 首次部署
+## 5. 发布与首次部署
 
-在仓库根目录执行：
+### 5.1 创建发布 tag
 
-~~~bash
-sudo ./scripts/bootstrap-ubuntu.sh
-~~~
-
-从其他目录执行时，可以显式给出源码目录：
+在开发机确认待发布代码已经合并到 `main`、本地验证通过且工作区没有未提交修改，然后创建带注释的版本 tag：
 
 ~~~bash
-sudo ./scripts/bootstrap-ubuntu.sh /home/eagleway-node-agent
+git switch main
+git pull --ff-only
+pnpm verify
+git status --short
+git push origin main
+git tag -a v0.1.0 -m "release: v0.1.0"
+git push origin v0.1.0
 ~~~
 
-Bootstrap 会安装依赖、Node.js 22、pnpm 11.22.0 和 PM2 6，创建低权限用户，构建不可变 release，安装 helper 和 sudo 规则，注册 PM2 开机启动并启动 Agent。重复执行会产生新的 release，不会删除 SQLite、state.key、证书或 Xray 用户状态。
+`git status --short` 应无输出。推送 `v*` tag 后，在以下地址查看构建进度：
+
+- https://github.com/472647301/eagleway-node-agent/actions/workflows/release.yml
+- https://github.com/472647301/eagleway-node-agent/releases
+
+不要移动或强制覆盖已经发布的 tag。发布内容需要修正时，提交修复并创建新的递增版本 tag，例如 `v0.1.1`。
+
+### 5.2 VPS 首次部署
+
+Release workflow 在 `ubuntu-22.04` x64/arm64 runner 上构建对应架构的生产发布包。推送 `v*` tag 会同时创建或更新 GitHub Release；手动运行 workflow 时，发布包位于该 Actions run 的 artifacts 中，保留 30 天。
+
+等待 GitHub Release 中出现 x64 和 arm64 产物后，在 VPS 执行：
+
+~~~bash
+TAG=v0.1.0
+curl -fsSL "https://raw.githubusercontent.com/472647301/eagleway-node-agent/${TAG}/scripts/deploy-ubuntu-release.sh" -o /tmp/eagleway-deploy.sh
+bash /tmp/eagleway-deploy.sh "${TAG}"
+~~~
+
+脚本自动识别 `x86_64`/`aarch64`，从公开 GitHub Release 下载对应包和 `.sha256` 文件，完成校验、解压和 Bootstrap。首次运行会创建 `~/.config/eagleway-node-agent/agent.env` 并打开 nano 或 vi；保存配置后会继续部署。校验失败时脚本不会执行包内 Bootstrap。
+
+Bootstrap 会安装基础运行依赖、Node.js 22 和 PM2 6，校验 release manifest 与本机平台，创建低权限用户，复制 CI 已构建的不可变 release，验证 `better-sqlite3` 原生模块，安装 helper 和 sudo 规则，注册 PM2 开机启动并启动 Agent。VPS 不安装 pnpm、TypeScript、Nest CLI 或编译工具。重复执行会产生新的 release，不会删除 SQLite、state.key、证书或 Xray 用户状态。
 
 部署后立即检查：
 
@@ -196,9 +211,15 @@ sudo -u eagleway-agent -H pm2 restart eagleway-node-agent --update-env
 
 ~~~bash
 sudo -u eagleway-agent -H pm2 status
+sudo -u eagleway-agent -H pm2 describe eagleway-node-agent
 sudo -u eagleway-agent -H pm2 logs eagleway-node-agent --nostream --lines 200
+sudo -u eagleway-agent -H pm2 logs eagleway-node-agent --lines 200
+sudo tail -n 200 /var/log/eagleway-node-agent/agent-error.log
+sudo tail -F /var/log/eagleway-node-agent/agent.log
 sudo journalctl -u eagleway-xray.service -n 200 --no-pager
 ~~~
+
+不带 `--nostream` 的 `pm2 logs` 和 `tail -F` 会持续跟踪日志，按 `Ctrl+C` 只退出查看，不会停止 Agent。标准输出位于 `/var/log/eagleway-node-agent/agent.log`，错误输出位于 `/var/log/eagleway-node-agent/agent-error.log`。
 
 检查端口和服务：
 
@@ -456,24 +477,20 @@ Agent、Node.js、PM2、Nginx、Certbot、证书和其他网站应保留。重�
 - 中心对未知来源 IP 也可能返回 204，因此必须在中心日志、数据库或管理接口确认该节点确实入账。
 - 上报 Body 不包含 nodeId，中心只能依据可信来源 IP 匹配节点。
 
-## 9. 源码更新与发布
+## 9. 更新与发布
 
-当前项目没有远程自更新服务。bootstrap 同时承担首次安装和从源码构建新 release 的职责；它不是零停机发布工具，应在维护窗口执行。
+当前项目没有远程自更新服务。CI 负责验证、构建和打包，bootstrap 只安装经过校验的 release artifact；它不是零停机发布工具，应在维护窗口执行。
 
 ### 9.1 发布前
 
 1. 暂停中心对该节点的 install/uninstall/start/stop 和用户修改。
 2. 查询 status，确认 activeOperation 为 null。
-3. 记录当前 release 和 Git 提交。
+3. 记录当前 release 和构建 manifest。
 
 ~~~bash
 readlink -f /opt/eagleway-node-agent/current
-cd /home/eagleway-node-agent
-git rev-parse HEAD
-git status --short
+cat /opt/eagleway-node-agent/current/release-manifest.json
 ~~~
-
-如果 git status 显示非预期源码修改，停止发布，不要使用 git reset --hard 覆盖现场。
 
 ### 9.2 备份
 
@@ -490,34 +507,21 @@ printf '%s\n' "$BACKUP_DIR"
 
 备份包含 state.key 和用户加密状态，必须按敏感数据保护。不要在 Agent 正在写 SQLite 时只复制 state.db 单文件。
 
-### 9.3 更新私有仓库
+### 9.3 获取 CI 发布包
 
-服务器应预先配置只读 deploy key 或受限凭证：
+为待发布提交创建 `v*` tag，由 Release workflow 生成 x64 和 arm64 包并发布到 GitHub Release。紧急验证也可以手动运行 workflow 并从 Actions run 下载 artifact，但该方式不会创建 GitHub Release，且 artifact 只保留 30 天。
 
-~~~bash
-cd /home/eagleway-node-agent
-git fetch --prune origin
-git status --short
-git pull --ff-only
-git rev-parse HEAD
-~~~
-
-.env 已被 .gitignore 忽略，正常 git pull 不会覆盖它。不要把私钥、访问令牌或 .env 提交到仓库。
-
-在源码目录执行发布前验证：
+公开仓库无需 deploy key、源码 checkout、pnpm 或开发依赖。确认对应 tag 的 Release workflow 成功后执行：
 
 ~~~bash
-corepack enable
-corepack prepare pnpm@11.22.0 --activate
-pnpm install --frozen-lockfile
-pnpm verify
+bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.1.1
 ~~~
+
+脚本会自动选择本机架构并验证 SHA-256。需要部署指定配置文件时，将其作为第二个参数传入。
 
 ### 9.4 创建并切换 release
 
-~~~bash
-sudo ./scripts/bootstrap-ubuntu.sh
-~~~
+便捷部署脚本会自动调用 Bootstrap 并切换 release，无需再手工执行解压或 Bootstrap 命令。
 
 如果 bootstrap 在 PM2 切换前失败，可恢复旧 Agent：
 
@@ -525,7 +529,7 @@ sudo ./scripts/bootstrap-ubuntu.sh
 sudo -u eagleway-agent -H pm2 restart eagleway-node-agent
 ~~~
 
-如果 git 更新、依赖安装或 verify 在执行 bootstrap 之前失败，也应立即执行上述命令恢复旧 Agent，再处理源码问题。
+如果下载、校验、解压或 bootstrap 失败，也应立即执行上述命令恢复旧 Agent，再处理发布包问题。
 
 ### 9.5 发布后检查
 
@@ -695,19 +699,32 @@ sudo certbot renew --dry-run
 - 中心始终是事实源。SQLite 丢失或重建后，节点必须标记 requiresUserSync，并由中心执行完整 users/sync。
 - 恢复后必须验证文件所有者、0600/0640 权限、PM2、status 和用户同步。
 
-## 15. Agent 下线边界
+## 15. Agent 下线与卸载
 
-当前没有正式的 Agent decommission 脚本。节点下线的安全顺序是：
+节点下线的安全顺序是：
 
 1. 在中心停止新的控制请求和用户分配。
-2. 调用协议 uninstall 并等待 not_installed。
-3. 验证 Eagleway 自有 Xray unit、二进制和配置已删除。
-4. 备份或按数据保留策略处理 agent.env、state.key、SQLite 和日志。
-5. 再人工删除 PM2 进程、PM2 startup、helper、sudoers、Agent release、状态目录和 eagleway-agent 用户。
-6. 人工删除云安全组和 UFW 中该节点的控制端口规则。
-7. 从中心注销节点。
+2. 如需留档，备份 agent.env、state.key、SQLite 和日志。
+3. 在节点上运行发布包内的卸载脚本。
+4. 检查云安全组和 UFW 中是否还有该节点的历史控制端口规则。
+5. 从中心注销节点。
 
-不要自动删除共享 Node.js、PM2、Nginx、Certbot、宝塔、证书或非 Eagleway 网站。正式批量下线前应先实现并评审专用 decommission 脚本。
+交互式完整卸载：
+
+~~~bash
+sudo bash /opt/eagleway-node-agent/current/scripts/uninstall-ubuntu.sh
+~~~
+
+输入 `uninstall` 后，脚本会停止并删除 PM2 进程和 startup unit，通过受限 helper 删除带 Eagleway 所有权标记的 Xray 资源，删除当前配置对应的 UFW allow 规则，然后删除 helper、sudoers、release、配置、state.key、SQLite、日志和 `eagleway-agent` 用户。脚本可重复执行；如果检测到受管 Xray 标记但可信 helper 已丢失，会停止而不是盲目删除系统资源。
+
+无人值守或保留数据：
+
+~~~bash
+sudo bash /opt/eagleway-node-agent/current/scripts/uninstall-ubuntu.sh --yes
+sudo bash /opt/eagleway-node-agent/current/scripts/uninstall-ubuntu.sh --keep-data
+~~~
+
+`--yes` 跳过交互确认。`--keep-data` 保留 `/etc/eagleway-node-agent`、`/var/lib/eagleway-node-agent`、`/var/log/eagleway-node-agent` 和服务用户，便于审计或恢复；程序、PM2 注册和受管 Xray 仍会移除。卸载脚本不会删除共享 Node.js、全局 PM2、Nginx、Certbot、宝塔、证书或非 Eagleway 网站。Bootstrap 早期版本添加或配置变更后遗留的 UFW 规则可能无法自动识别，仍需执行 `sudo ufw status numbered` 人工核对；云安全组规则始终需要在云平台删除。
 
 ## 16. 上线验收清单
 

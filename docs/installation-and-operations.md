@@ -145,7 +145,7 @@ helper 不接受任意命令字符串、任意 unit、任意目标路径或 shel
 - 保留共享 Nginx、宝塔、Node.js、PM2、ACME 客户端和非 Agent 证书。
 - 默认保留 Agent 自身，使中心仍可查询 not_installed 并再次安装。
 
-删除 Agent 本身属于独立的 decommission 流程，不由 `/api/trojan/uninstall` 执行。
+删除 Agent 本身属于独立的 decommission 流程，不由 `/api/trojan/uninstall` 执行。使用发布包内的 `scripts/uninstall-ubuntu.sh` 完成下线；默认完整清理，`--keep-data` 可保留配置、状态和日志。
 
 ## 10. IP 白名单
 

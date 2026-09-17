@@ -225,7 +225,7 @@ Agent 可返回：
 - 所有字节累计值序列化为非负十进制字符串。
 - reportedAt 使用 UTC ISO 8601，并保证相对本 Agent 上次上报单调递增。
 - runtimeEpoch 使用 systemd InvocationID，中心据此识别整个 Xray 进程的计数器重置。
-- `bandwidthMbps` 来自 VPS 的 `SERVER_BANDWIDTH_MBPS`，不使用网卡协商速率或测速结果猜测。
+- 服务器带宽由中心 API 自己维护，不进入 Agent 配置或流量上报。
 - `managedUserCount` 来自 Xray HandlerService 当前入站用户列表。
 - 上报失败指数退避，不修改累计计数器。
 - 中心以来源 IP 匹配节点，Body 不包含 nodeId。

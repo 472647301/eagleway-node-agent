@@ -23,7 +23,7 @@ Agent 不是中心数据库的副本。中心服务始终是节点配置、用�
 - Trojan、VLESS、VMess 安装、卸载、启动、停止和状态查询。
 - 三协议用户全量同步、增量新增/更新和删除。
 - 按用户累计上下行流量采集。
-- 节点主动向中心上报流量、服务器带宽和 Xray 实际用户数。
+- 节点主动向中心上报流量和 Xray 实际用户数。
 - 安全的本机日志文件列表和分页读取。
 - 空白 Ubuntu VPS 与 Ubuntu 宝塔环境的预检和安装。
 - 中断识别、幂等控制和结构化错误。
@@ -63,20 +63,67 @@ pnpm install
 pnpm verify
 ```
 
-## Ubuntu Bootstrap
+## 发布新版本
 
-在准备好的源码目录执行：
+版本代码合并到 `main` 并确认工作区干净后，创建并推送一个新的 `v*` tag：
 
 ```bash
-cp .env.example .env
-# 编辑 .env，至少正确配置 NODE_ID、ALLOWED_CIDRS、
-# SERVER_BANDWIDTH_MBPS 和 REPORTING_ENABLED。
-sudo ./scripts/bootstrap-ubuntu.sh
+git switch main
+git pull --ff-only
+pnpm verify
+git status --short
+git push origin main
+git tag -a v0.1.0 -m "release: v0.1.0"
+git push origin v0.1.0
 ```
 
-Bootstrap 默认读取仓库根目录的 `.env`；也可以将源码目录作为唯一参数传入。缺少必要配置、生产配置无效，或者启用上报但未设置 `CENTER_API_URL` 时，脚本会在安装前报错。Bootstrap 会创建低权限用户、安装 PM2、构建项目、安装受限 helper 并配置单实例开机启动。应用发布目录和 helper 均归 root 所有，Agent 用户只有状态、密钥和日志目录所需权限。
+`git status --short` 应无输出。tag 推送后可在 [Release workflow](https://github.com/472647301/eagleway-node-agent/actions/workflows/release.yml) 查看构建进度；成功后产物会发布到 [GitHub Releases](https://github.com/472647301/eagleway-node-agent/releases)。已经发布的 tag 不要强制覆盖，修复后创建新的递增版本 tag。
+
+## Ubuntu Bootstrap
+
+推送 `v*` tag 会触发 Release workflow，在 Ubuntu x64 和 arm64 runner 上完成验证、Nest 构建和生产依赖安装，并发布以下带 SHA-256 校验文件的 GitHub Release assets：
+
+- `eagleway-node-agent-linux-x64.tar.gz`
+- `eagleway-node-agent-linux-arm64.tar.gz`
+
+也可以手动运行 Release workflow；手动运行的产物保留在对应 Actions run 中，不会创建 GitHub Release。
+
+Release workflow 完成后，在 VPS 上只需下载同一个 tag 中的部署脚本并运行：
+
+```bash
+TAG=v0.1.0
+curl -fsSL "https://raw.githubusercontent.com/472647301/eagleway-node-agent/${TAG}/scripts/deploy-ubuntu-release.sh" -o /tmp/eagleway-deploy.sh
+bash /tmp/eagleway-deploy.sh "${TAG}"
+```
+
+脚本会自动识别 x64/arm64、下载 release 和校验文件、验证 SHA-256、解压并调用 Bootstrap。首次运行会创建 `~/.config/eagleway-node-agent/agent.env` 并打开编辑器；至少填写 `NODE_ID`、`ALLOWED_CIDRS` 和 `REPORTING_ENABLED`。服务器带宽由中心 API 自行维护，不需要写入 Agent 配置。后续升级只需：
+
+```bash
+bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.1.1
+```
+
+部署后常用检查：
+
+```bash
+sudo -u eagleway-agent -H pm2 status
+sudo -u eagleway-agent -H pm2 describe eagleway-node-agent
+sudo -u eagleway-agent -H pm2 logs eagleway-node-agent --nostream --lines 200
+curl -fsS http://127.0.0.1:8086/api/health
+```
+
+Bootstrap 会校验 release manifest、平台、CPU 架构和 Node.js 主版本，创建低权限用户，安装 Node.js 22 和 PM2，复制 CI 构建产物，安装受限 helper 并配置单实例开机启动；服务器不再运行 `pnpm install` 或 Nest/TypeScript 构建。应用发布目录和 helper 均归 root 所有，Agent 用户只有状态、密钥和日志目录所需权限。
 
 首次部署、服务器本机全功能自测、与中心联调、源码升级和人工回滚的可执行步骤见[运维与服务器自测手册](docs/operations-runbook.md)。
+
+## Ubuntu 卸载
+
+完整卸载 Agent 及其管理的 Xray 运行时：
+
+```bash
+sudo bash /opt/eagleway-node-agent/current/scripts/uninstall-ubuntu.sh
+```
+
+脚本执行前要求输入 `uninstall` 确认。自动化执行可加 `--yes`；需要保留 `/etc/eagleway-node-agent`、SQLite 状态、日志和服务用户时可加 `--keep-data`。脚本会保留共享的 Node.js、PM2、Nginx、Certbot、证书和非 Eagleway 网站。卸载前应先在中心停止控制请求和用户分配，卸载后还需从中心注销节点并检查云安全组规则。
 
 安装协议时，受限 helper 会根据 VPS 架构直接下载源码中固定的 XTLS 官方 GitHub Release（当前为稳定版 `v26.3.27`），并使用源码内固定的 SHA-256 校验后再安装。控制请求和环境变量都不能改变下载地址、版本或校验值；升级 Xray-core 需要发布新版 Agent。
 
