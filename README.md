@@ -104,6 +104,13 @@ bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.1.6
 
 部署后常用检查：
 
+Ubuntu 防火墙
+```bash
+sudo ufw status verbose
+sudo ufw allow 80/tcp
+sudo ufw reload
+```
+
 ```bash
 sudo -u eagleway-agent -H pm2 status
 sudo -u eagleway-agent -H pm2 describe eagleway-node-agent
