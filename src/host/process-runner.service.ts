@@ -21,7 +21,9 @@ export class ProcessExecutionError extends Error {
   constructor(
     readonly executable: string,
     readonly exitCode: number | null,
-    message = 'Host command failed'
+    message = 'Host command failed',
+    readonly stdout = '',
+    readonly stderr = ''
   ) {
     super(message)
     this.name = ProcessExecutionError.name
@@ -48,6 +50,7 @@ export class ProcessRunnerService {
       const child = spawn(executable, [...args], {
         shell: false,
         windowsHide: true,
+        detached: process.platform !== 'win32',
         cwd: options.cwd,
         stdio: ['ignore', 'pipe', 'pipe']
       })
@@ -56,6 +59,7 @@ export class ProcessRunnerService {
       let stdoutBytes = 0
       let stderrBytes = 0
       let outputExceeded = false
+      let timedOut = false
       const append = (
         current: Buffer[],
         currentBytes: number,
@@ -63,7 +67,7 @@ export class ProcessRunnerService {
       ): number => {
         if (currentBytes + chunk.length > maxOutputBytes) {
           outputExceeded = true
-          child.kill('SIGKILL')
+          killProcessTree(child.pid)
           return currentBytes
         }
         current.push(chunk)
@@ -75,7 +79,10 @@ export class ProcessRunnerService {
       child.stderr.on('data', (chunk: Buffer) => {
         stderrBytes = append(stderr, stderrBytes, chunk)
       })
-      const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs)
+      const timer = setTimeout(() => {
+        timedOut = true
+        killProcessTree(child.pid)
+      }, timeoutMs)
       timer.unref()
       child.once('error', (error) => {
         clearTimeout(timer)
@@ -91,27 +98,69 @@ export class ProcessRunnerService {
       })
       child.once('close', (code) => {
         clearTimeout(timer)
+        const stdoutText = Buffer.concat(stdout).toString('utf8').trim()
+        const stderrText = Buffer.concat(stderr).toString('utf8').trim()
+        if (timedOut) {
+          reject(
+            new ProcessExecutionError(
+              executable,
+              code,
+              'Host command timed out',
+              stdoutText,
+              stderrText
+            )
+          )
+          return
+        }
         if (outputExceeded) {
           reject(
             new ProcessExecutionError(
               executable,
               code,
-              'Host command output exceeded limit'
+              'Host command output exceeded limit',
+              stdoutText,
+              stderrText
             )
           )
           return
         }
         const result = {
           code: code ?? -1,
-          stdout: Buffer.concat(stdout).toString('utf8').trim(),
-          stderr: Buffer.concat(stderr).toString('utf8').trim()
+          stdout: stdoutText,
+          stderr: stderrText
         }
         if ((options.rejectOnNonZero ?? true) && result.code !== 0) {
-          reject(new ProcessExecutionError(executable, result.code))
+          reject(
+            new ProcessExecutionError(
+              executable,
+              result.code,
+              'Host command failed',
+              result.stdout,
+              result.stderr
+            )
+          )
           return
         }
         resolve(result)
       })
     })
+  }
+}
+
+function killProcessTree(pid: number | undefined): void {
+  if (pid && process.platform !== 'win32') {
+    try {
+      process.kill(-pid, 'SIGKILL')
+      return
+    } catch {
+      // Fall back to killing the direct child if its process group is gone.
+    }
+  }
+  if (pid) {
+    try {
+      process.kill(pid, 'SIGKILL')
+    } catch {
+      // The child may have exited between the timeout and this signal.
+    }
   }
 }

@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common'
+import { Inject, Injectable, Logger } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
 import {
   existsSync,
@@ -35,6 +35,8 @@ export interface XrayInstallInput {
 
 @Injectable()
 export class XrayProvisioningService {
+  private readonly logger = new Logger(XrayProvisioningService.name)
+
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly inspector: HostInspectorService,
@@ -62,7 +64,11 @@ export class XrayProvisioningService {
     const certificateAvailable = this.inspector.certificateAvailable(
       input.domain
     )
-    if (host.profile === 'ubuntu' && !certificateAvailable) {
+    if (
+      host.profile === 'ubuntu' &&
+      !certificateAvailable &&
+      !(await this.inspector.standardNginxActive())
+    ) {
       await this.inspector.assertPortAvailable(80)
     }
     return host
@@ -85,7 +91,12 @@ export class XrayProvisioningService {
       acmeEmail: this.config.acmeEmail
     })
     try {
-      await this.helper.run('xray-install', planPath)
+      try {
+        await this.helper.run('xray-install', planPath)
+      } catch (error) {
+        await this.cleanupFailedInstall()
+        throw error
+      }
       const resources = [
         ['systemd-unit', 'eagleway-xray.service'],
         ['runtime-binary', '/usr/local/bin/xray'],
@@ -178,6 +189,10 @@ export class XrayProvisioningService {
     this.state.markOwnedResourcesRemoved('eagleway-node-agent:xray')
   }
 
+  async cleanupPartialInstall(): Promise<void> {
+    await this.helper.run('xray-uninstall')
+  }
+
   start() {
     return this.helper.run('xray-start')
   }
@@ -203,6 +218,29 @@ export class XrayProvisioningService {
     writeFileSync(path, JSON.stringify(value), { mode: 0o600, flag: 'wx' })
     return path
   }
+
+  private async cleanupFailedInstall(): Promise<void> {
+    try {
+      await this.helper.run('xray-uninstall')
+    } catch (error) {
+      this.logger.error({
+        event: 'xray.install_cleanup_failed',
+        errorCode: operationErrorCode(error)
+      })
+    }
+  }
+}
+
+function operationErrorCode(error: unknown): string {
+  if (
+    error &&
+    typeof error === 'object' &&
+    'errorCode' in error &&
+    typeof error.errorCode === 'string'
+  ) {
+    return error.errorCode
+  }
+  return 'OPERATION_FAILED'
 }
 
 function isManagedNginxConfig(path: string): boolean {

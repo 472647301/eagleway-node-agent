@@ -53,23 +53,56 @@ test('config apply rejects stale revisions before changing the host', async () =
   )
 })
 
-function fixtureService(runtimeConfig: object): XrayService {
+test('install cleans a stale partial runtime before preflight', async () => {
+  const calls: string[] = []
+  const service = fixtureService(null, {
+    findActiveOperation: () => null,
+    cleanupPartialInstall: async () => {
+      calls.push('cleanup')
+    },
+    preflight: async () => {
+      calls.push('preflight')
+      return {}
+    }
+  })
+
+  await service.install('trojan', desired)
+  assert.deepEqual(calls, ['cleanup', 'preflight'])
+})
+
+function fixtureService(
+  runtimeConfig: object | null,
+  overrides: {
+    findActiveOperation?: () => object | null
+    cleanupPartialInstall?: () => Promise<void>
+    preflight?: () => Promise<object>
+  } = {}
+): XrayService {
   const config = { nodeId: 7 } as AppConfig
   const client = {
     hasManagedResources: () => true,
-    isInstalled: () => true,
+    isInstalled: () => runtimeConfig !== null,
     isActive: async () => true
   }
   const state = {
     getMeta: (key: string) => (key === 'xray.protocol' ? 'trojan' : null),
-    runtimeConfig: () => runtimeConfig
+    runtimeConfig: () => runtimeConfig,
+    findActiveOperation: overrides.findActiveOperation ?? (() => null)
+  }
+  const provisioning = {
+    cleanupPartialInstall:
+      overrides.cleanupPartialInstall ?? (async () => undefined),
+    preflight: overrides.preflight ?? (async () => ({}))
+  }
+  const operations = {
+    start: () => ({ operationId: 'operation-id' })
   }
   return new XrayService(
     config,
     client as never,
+    provisioning as never,
     {} as never,
-    {} as never,
-    {} as never,
+    operations as never,
     state as never
   )
 }

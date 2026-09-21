@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { AgentError } from '@/common/api/agent-error'
 import { BAOTA_NGINX_BINARY } from './nginx-acme'
+import { ProcessRunnerService } from './process-runner.service'
 
 export type HostProfile = 'ubuntu' | 'ubuntu-baota'
 
@@ -18,6 +19,8 @@ export interface HostInspection {
 @Injectable()
 export class HostInspectorService {
   private readonly logger = new Logger(HostInspectorService.name)
+
+  constructor(private readonly processes: ProcessRunnerService) {}
 
   inspect(): HostInspection {
     if (process.platform !== 'linux') {
@@ -99,6 +102,16 @@ export class HostInspectorService {
         HttpStatus.CONFLICT
       )
     }
+  }
+
+  async standardNginxActive(): Promise<boolean> {
+    if (!existsSync('/usr/sbin/nginx')) return false
+    const result = await this.processes.run(
+      '/usr/bin/systemctl',
+      ['is-active', '--quiet', 'nginx'],
+      { rejectOnNonZero: false, timeoutMs: 5000, maxOutputBytes: 4096 }
+    )
+    return result.code === 0
   }
 
   certificateAvailable(domain: string): boolean {

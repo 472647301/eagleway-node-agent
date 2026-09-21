@@ -143,11 +143,17 @@ async function install(plan: InstallPlan): Promise<void> {
   run(
     '/usr/bin/unzip',
     ['-j', '-o', archivePath, '*/xray', '-d', extractDir],
-    false
+    false,
+    'Runtime archive extraction failed'
   )
   const extracted = join(extractDir, 'xray')
   if (!existsSync(extracted)) {
-    run('/usr/bin/unzip', ['-j', '-o', archivePath, 'xray', '-d', extractDir])
+    run(
+      '/usr/bin/unzip',
+      ['-j', '-o', archivePath, 'xray', '-d', extractDir],
+      true,
+      'Runtime archive extraction failed'
+    )
   }
   if (!existsSync(extracted)) fail('Xray archive does not contain xray')
   copyFileSync(extracted, runtimeBinary)
@@ -160,12 +166,22 @@ async function install(plan: InstallPlan): Promise<void> {
     0o600
   )
   prepareRuntimeLogs()
-  run(runtimeBinary, ['run', '-test', '-config', runtimeConfigPath])
+  run(
+    runtimeBinary,
+    ['run', '-test', '-config', runtimeConfigPath],
+    true,
+    'Generated Xray configuration is invalid'
+  )
   atomicWrite(unitPath, systemdUnit(), 0o644)
   systemctl('daemon-reload')
   systemctl('enable', 'eagleway-xray.service')
   systemctl('restart', 'eagleway-xray.service')
-  run('/usr/bin/systemctl', ['is-active', '--quiet', 'eagleway-xray.service'])
+  run(
+    '/usr/bin/systemctl',
+    ['is-active', '--quiet', 'eagleway-xray.service'],
+    true,
+    'Xray runtime failed to start'
+  )
   rmSync(extractDir, { recursive: true, force: true })
 }
 
@@ -298,22 +314,31 @@ function ensureCertificate(plan: InstallPlan): { cert: string; key: string } {
   }
 
   if (plan.hostProfile === 'ubuntu') {
-    run('/usr/bin/apt-get', ['update'])
-    run('/usr/bin/apt-get', [
-      'install',
-      '-y',
-      '--no-install-recommends',
-      'nginx',
-      'certbot'
-    ])
+    run(
+      '/usr/bin/apt-get',
+      ['update'],
+      true,
+      'System package index update failed'
+    )
+    run(
+      '/usr/bin/apt-get',
+      ['install', '-y', '--no-install-recommends', 'nginx', 'certbot'],
+      true,
+      'Required package installation failed'
+    )
   } else if (!existsSync('/usr/bin/certbot')) {
-    run('/usr/bin/apt-get', ['update'])
-    run('/usr/bin/apt-get', [
-      'install',
-      '-y',
-      '--no-install-recommends',
-      'certbot'
-    ])
+    run(
+      '/usr/bin/apt-get',
+      ['update'],
+      true,
+      'System package index update failed'
+    )
+    run(
+      '/usr/bin/apt-get',
+      ['install', '-y', '--no-install-recommends', 'certbot'],
+      true,
+      'Required package installation failed'
+    )
   }
   const webroot =
     plan.hostProfile === 'ubuntu-baota'
@@ -329,7 +354,12 @@ function ensureCertificate(plan: InstallPlan): { cert: string; key: string } {
       fail('Existing Nginx configuration is not owned by Eagleway')
     }
     atomicWrite(nginxPath, nginxConfig(plan, webroot), 0o644)
-    run('/usr/sbin/nginx', ['-t'])
+    run(
+      '/usr/sbin/nginx',
+      ['-t'],
+      true,
+      'Nginx configuration validation failed'
+    )
     systemctl('enable', 'nginx')
     const nginxActive =
       run('/usr/bin/systemctl', ['is-active', '--quiet', 'nginx'], false)
@@ -349,7 +379,7 @@ function ensureCertificate(plan: InstallPlan): { cert: string; key: string } {
   ]
   if (plan.acmeEmail) certbotArgs.push('--email', plan.acmeEmail)
   else certbotArgs.push('--register-unsafely-without-email')
-  run('/usr/bin/certbot', certbotArgs)
+  run('/usr/bin/certbot', certbotArgs, true, 'Certificate issuance failed')
   const issued = candidates[1]!
   if (!existsSync(issued.cert) || !existsSync(issued.key)) {
     fail('Certificate issuance did not create expected files')
@@ -673,7 +703,8 @@ function systemctl(...args: string[]): void {
 function run(
   executable: string,
   args: string[],
-  required = true
+  required = true,
+  failureMessage = 'Privileged host command failed'
 ): SpawnSyncReturns<string> {
   const result = spawnSync(executable, args, {
     shell: false,
@@ -682,8 +713,7 @@ function run(
     timeout: 15 * 60 * 1000,
     maxBuffer: 1024 * 1024
   })
-  if (required && (result.error || result.status !== 0))
-    fail('Privileged host command failed')
+  if (required && (result.error || result.status !== 0)) fail(failureMessage)
   return result
 }
 
@@ -786,9 +816,15 @@ function safeRemove(path: string): void {
   }
 }
 
+class HelperFailure extends Error {}
+
 function fail(message: string): never {
-  process.stderr.write(`${message}\n`)
-  process.exit(1)
+  throw new HelperFailure(message)
 }
 
-void main().catch(() => fail('Privileged helper failed'))
+void main().catch((error) => {
+  const message =
+    error instanceof HelperFailure ? error.message : 'Privileged helper failed'
+  process.stderr.write(`${message}\n`)
+  process.exitCode = 1
+})

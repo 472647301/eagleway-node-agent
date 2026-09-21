@@ -31,6 +31,13 @@ export class XrayService {
     this.assertNode(body.nodeId)
     const input = configInput(protocol, body)
     const configHash = runtimeConfigHash(input)
+    if (
+      !this.state.findActiveOperation('xray') &&
+      this.client.hasManagedResources() &&
+      !this.state.runtimeConfig()
+    ) {
+      await this.provisioning.cleanupPartialInstall()
+    }
     const installedProtocol = this.installedProtocol()
     if (
       this.client.hasManagedResources() &&

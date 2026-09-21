@@ -104,7 +104,8 @@ export class OperationCoordinatorService implements OnApplicationBootstrap {
         operationId: operation.operationId,
         protocol: operation.protocol,
         type: operation.operationType,
-        errorCode: safe.errorCode
+        errorCode: safe.errorCode,
+        errorMessage: safe.message
       })
     } finally {
       this.running = false
