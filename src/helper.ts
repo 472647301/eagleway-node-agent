@@ -827,7 +827,11 @@ function fail(message: string): never {
 
 void main().catch((error) => {
   const message =
-    error instanceof HelperFailure ? error.message : 'Privileged helper failed'
+    error instanceof HelperFailure
+      ? error.message
+      : error instanceof Error && error.message
+        ? `Privileged helper failed: ${error.message}`
+        : 'Privileged helper failed'
   process.stderr.write(`${message}\n`)
   process.exitCode = 1
 })

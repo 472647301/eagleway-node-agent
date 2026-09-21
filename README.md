@@ -73,8 +73,8 @@ git pull --ff-only
 pnpm verify
 git status --short
 git push origin main
-git tag -a v0.1.5 -m "release: v0.1.5"
-git push origin v0.1.5
+git tag -a v0.1.6 -m "release: v0.1.6"
+git push origin v0.1.6
 ```
 
 `git status --short` 应无输出。tag 推送后可在 [Release workflow](https://github.com/472647301/eagleway-node-agent/actions/workflows/release.yml) 查看构建进度；成功后产物会发布到 [GitHub Releases](https://github.com/472647301/eagleway-node-agent/releases)。已经发布的 tag 不要强制覆盖，修复后创建新的递增版本 tag。
@@ -91,7 +91,7 @@ git push origin v0.1.5
 Release workflow 完成后，在 VPS 上只需下载同一个 tag 中的部署脚本并运行：
 
 ```bash
-TAG=v0.1.5
+TAG=v0.1.6
 curl -fsSL "https://raw.githubusercontent.com/472647301/eagleway-node-agent/${TAG}/scripts/deploy-ubuntu-release.sh" -o /tmp/eagleway-deploy.sh
 bash /tmp/eagleway-deploy.sh "${TAG}"
 ```
@@ -99,7 +99,7 @@ bash /tmp/eagleway-deploy.sh "${TAG}"
 脚本会自动识别 x64/arm64、下载 release 和校验文件、验证 SHA-256、解压并调用 Bootstrap。首次运行会创建 `~/.config/eagleway-node-agent/agent.env` 并打开编辑器；至少填写 `NODE_ID`、`ALLOWED_CIDRS` 和 `REPORTING_ENABLED`。服务器带宽由中心 API 自行维护，不需要写入 Agent 配置。后续升级只需：
 
 ```bash
-bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.1.5
+bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.1.6
 ```
 
 部署后常用检查：

@@ -46,14 +46,10 @@ export class PrivilegedHelperService {
 }
 
 function helperSafeMessage(stderr: string): string | null {
-  const message = stderr.trim()
-  if (
-    !message ||
-    message.length > 200 ||
-    message.includes('\n') ||
-    !/^[A-Za-z0-9 .,:()_-]+$/.test(message)
-  ) {
-    return null
-  }
-  return message
+  const message = stderr
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!message) return null
+  return message.replace(/[^A-Za-z0-9 .,:()_/@=%+'-]/g, ' ').slice(-500)
 }

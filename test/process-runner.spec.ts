@@ -114,3 +114,29 @@ test('privileged helper includes bounded stderr in host command failures', async
         'Certificate issuance failed: DNS problem second detail'
   )
 })
+
+test('privileged helper flattens multiline command failures', async () => {
+  const failure = new ProcessExecutionError(
+    '/usr/local/libexec/eagleway-node-helper',
+    1,
+    'Host command failed',
+    '',
+    'nginx: configuration error\ncertbot: challenge failed'
+  )
+  const processes = { run: async () => Promise.reject(failure) }
+  const service = new PrivilegedHelperService(
+    {
+      privilegedHelper: '/usr/local/libexec/eagleway-node-helper',
+      operationTimeoutSeconds: 900
+    } as AppConfig,
+    processes as never
+  )
+
+  await assert.rejects(
+    service.run('xray-install', '/var/lib/plan.json'),
+    (error: unknown) =>
+      error instanceof ProcessExecutionError &&
+      error.safeMessage ===
+        'nginx: configuration error certbot: challenge failed'
+  )
+})
