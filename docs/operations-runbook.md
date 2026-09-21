@@ -230,6 +230,40 @@ sudo nginx -t
 sudo certbot certificates
 ~~~
 
+### 6.1 Xray 运行状态与配置检查
+
+Eagleway 管理的 Xray systemd unit 是 `eagleway-xray.service`，不是上游安装脚本常用的 `xray.service`；配置文件固定为 `/etc/eagleway-node-agent/runtimes/xray/config.json`。
+
+查看服务状态、实际启动参数和日志：
+
+~~~bash
+sudo systemctl status eagleway-xray.service --no-pager -l
+sudo systemctl is-enabled eagleway-xray.service
+sudo systemctl is-active eagleway-xray.service
+sudo systemctl show eagleway-xray.service -p ExecStart -p FragmentPath
+sudo systemctl cat eagleway-xray.service
+sudo journalctl -u eagleway-xray.service -n 200 --no-pager
+~~~
+
+检查程序、配置、所有权标记和监听端口：
+
+~~~bash
+sudo test -x /usr/local/bin/xray && echo 'xray binary: ok' || echo 'xray binary: missing'
+sudo test -f /etc/eagleway-node-agent/runtimes/xray/config.json && echo 'xray config: ok' || echo 'xray config: missing'
+sudo -u eagleway-agent test -e /etc/eagleway-node-agent/runtimes/xray/.managed-by-eagleway-node-agent && echo 'ownership marker: visible' || echo 'ownership marker: missing or unreadable'
+sudo /usr/local/bin/xray version
+sudo ss -lntup | grep -E 'xray|:10000'
+~~~
+
+仅在服务器本机查看并验证配置：
+
+~~~bash
+sudo less /etc/eagleway-node-agent/runtimes/xray/config.json
+sudo /usr/local/bin/xray run -test -config /etc/eagleway-node-agent/runtimes/xray/config.json
+~~~
+
+配置可能包含 UUID、密码、证书路径或私钥，禁止粘贴到聊天、日志或工单。如果 `eagleway-xray.service`、Xray 程序和配置文件均不存在，通常表示 Agent 已部署但协议尚未通过中心的 install 接口安装；此时 status 应为 `not_installed`。不要手工创建 `xray.service`，应通过中心安装 Trojan、VLESS 或 VMess，让 Agent 创建和管理运行时资源。
+
 不要在 install/uninstall 的 activeOperation 非空时重启 Agent、执行 bootstrap 或重启服务器。
 
 ## 7. 服务器本机全功能自测
