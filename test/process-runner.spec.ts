@@ -110,6 +110,7 @@ test('privileged helper includes bounded stderr in host command failures', async
     service.run('xray-install', '/var/lib/plan.json'),
     (error: unknown) =>
       error instanceof ProcessExecutionError &&
-      error.safeMessage === 'Certificate issuance failed: DNS problem second detail'
+      error.safeMessage ===
+        'Certificate issuance failed: DNS problem second detail'
   )
 })
