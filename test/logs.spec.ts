@@ -48,6 +48,18 @@ test('log parser accepts structured JSON lines', () => {
   assert.equal(parsed.message, 'sent')
 })
 
+test('log parser converts Unix second and millisecond timestamps', () => {
+  assert.equal(
+    parseLogLine('{"timestamp":1725408000,"message":"seconds"}').timestamp,
+    '2024-09-04T00:00:00.000Z'
+  )
+  assert.equal(
+    parseLogLine('{"timestamp":1725408000000,"message":"milliseconds"}')
+      .timestamp,
+    '2024-09-04T00:00:00.000Z'
+  )
+})
+
 test('log parser accepts legacy lines and redacts recognizable secrets', () => {
   const legacy = parseLogLine(
     '[2026-09-04T00:00:00.000Z] [warn] Reporter - retrying'

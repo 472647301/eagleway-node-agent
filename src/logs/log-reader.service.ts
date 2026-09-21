@@ -302,6 +302,12 @@ function parseStructuredLine(logLine: string): ParsedLogLine | null {
 function normalizeTimestamp(value: unknown): string {
   if (typeof value !== 'string' && typeof value !== 'number') return ''
   const raw = String(value)
+  const numeric = Number(raw)
+  if (raw.trim() !== '' && Number.isFinite(numeric)) {
+    const milliseconds = Math.abs(numeric) < 1e12 ? numeric * 1000 : numeric
+    const numericDate = new Date(milliseconds)
+    return Number.isNaN(numericDate.getTime()) ? raw : numericDate.toISOString()
+  }
   const parsed = new Date(
     raw.replace(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2}\.\d{3})$/, '$1T$2')
   )

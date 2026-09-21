@@ -713,7 +713,13 @@ function run(
     timeout: 15 * 60 * 1000,
     maxBuffer: 1024 * 1024
   })
-  if (required && (result.error || result.status !== 0)) fail(failureMessage)
+  if (required && (result.error || result.status !== 0)) {
+    const detail = result.stderr
+      ?.replace(/\s+/g, ' ')
+      .trim()
+      .slice(-500)
+    fail(detail ? `${failureMessage}: ${detail}` : failureMessage)
+  }
   return result
 }
 

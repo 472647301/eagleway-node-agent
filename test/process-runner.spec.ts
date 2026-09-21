@@ -86,3 +86,30 @@ test('privileged helper exposes only a single safe helper error line', async () 
       error.safeMessage === 'Certificate issuance failed'
   )
 })
+
+test('privileged helper includes bounded stderr in host command failures', async () => {
+  const failure = new ProcessExecutionError(
+    '/usr/local/libexec/eagleway-node-helper',
+    1,
+    'Host command failed',
+    '',
+    'Certificate issuance failed: DNS problem second detail'
+  )
+  const processes = {
+    run: async () => Promise.reject(failure)
+  }
+  const service = new PrivilegedHelperService(
+    {
+      privilegedHelper: '/usr/local/libexec/eagleway-node-helper',
+      operationTimeoutSeconds: 900
+    } as AppConfig,
+    processes as never
+  )
+
+  await assert.rejects(
+    service.run('xray-install', '/var/lib/plan.json'),
+    (error: unknown) =>
+      error instanceof ProcessExecutionError &&
+      error.safeMessage === 'Certificate issuance failed: DNS problem second detail'
+  )
+})
