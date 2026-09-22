@@ -153,6 +153,14 @@ export class XrayClient implements OnModuleDestroy {
     return traffic
   }
 
+  async listOnlineUserIds(): Promise<string[]> {
+    const response = await this.unary(
+      '/xray.app.stats.command.StatsService/GetAllOnlineUsers',
+      Buffer.alloc(0)
+    )
+    return parseOnlineUserIds(response)
+  }
+
   private alterInbound(protocol: XrayProtocol, operation: Buffer) {
     return this.unary(
       '/xray.app.proxyman.command.HandlerService/AlterInbound',
@@ -178,6 +186,22 @@ export class XrayClient implements OnModuleDestroy {
       )
     })
   }
+}
+
+export function parseOnlineUserIds(response: Buffer): string[] {
+  return protobufFields(response)
+    .filter(
+      (field) =>
+        field.number === 1 &&
+        field.wireType === 2 &&
+        Buffer.isBuffer(field.value)
+    )
+    .flatMap((field) => {
+      const match = /^user>>>(.+)>>>online$/.exec(
+        (field.value as Buffer).toString('utf8')
+      )
+      return match ? [match[1]!] : []
+    })
 }
 
 function typedMessage(type: string, value: Buffer): Buffer {

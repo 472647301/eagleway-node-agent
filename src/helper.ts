@@ -40,6 +40,12 @@ import {
   baotaAcmeWebroot,
   inspectNginxDomain
 } from './host/nginx-acme'
+import {
+  XRAY_FIREWALL_COMMENT,
+  ufwAllowsTcpPort,
+  ufwIsActive,
+  ufwOwnedRuleNumbers
+} from './host/firewall-rules'
 
 const stateDir = resolve(
   process.env.STATE_DIR || '/var/lib/eagleway-node-agent'
@@ -51,6 +57,7 @@ const unitPath = '/etc/systemd/system/eagleway-xray.service'
 const runtimeConfigPath = join(runtimeDir, 'config.json')
 const runtimeMarker = join(runtimeDir, '.managed-by-eagleway-node-agent')
 const runtimeMarkerValue = 'eagleway-node-agent:xray:v1\n'
+const firewallManifestPath = join(runtimeDir, 'firewall-rules.json')
 const runtimeLogDir = '/var/log/eagleway-node-agent'
 const runtimeLogPaths = [
   join(runtimeLogDir, 'xray-access.log'),
@@ -83,6 +90,24 @@ type InstallPlan = {
   proxyUrl: string | null
   apiAddress: string
   acmeEmail: string | null
+}
+
+type FirewallRule =
+  | {
+      manager: 'ufw'
+      port: number
+    }
+  | {
+      manager: 'firewalld'
+      port: number
+      zone: string
+      runtimeAdded: boolean
+      permanentAdded: boolean
+    }
+
+interface FirewallManifest {
+  schemaVersion: 1
+  rules: FirewallRule[]
 }
 
 async function main(): Promise<void> {
@@ -159,30 +184,38 @@ async function install(plan: InstallPlan): Promise<void> {
   copyFileSync(extracted, runtimeBinary)
   chmodSync(runtimeBinary, 0o755)
 
-  const certificate = ensureCertificate(plan)
-  atomicWrite(
-    runtimeConfigPath,
-    `${JSON.stringify(xrayConfig(plan, certificate), null, 2)}\n`,
-    0o600
-  )
-  prepareRuntimeLogs()
-  run(
-    runtimeBinary,
-    ['run', '-test', '-config', runtimeConfigPath],
-    true,
-    'Generated Xray configuration is invalid'
-  )
-  atomicWrite(unitPath, systemdUnit(), 0o644)
-  systemctl('daemon-reload')
-  systemctl('enable', 'eagleway-xray.service')
-  systemctl('restart', 'eagleway-xray.service')
-  run(
-    '/usr/bin/systemctl',
-    ['is-active', '--quiet', 'eagleway-xray.service'],
-    true,
-    'Xray runtime failed to start'
-  )
-  rmSync(extractDir, { recursive: true, force: true })
+  const previousFirewall = readFirewallManifest()
+  try {
+    ensureFirewallPorts([80, plan.port])
+    const certificate = ensureCertificate(plan)
+    atomicWrite(
+      runtimeConfigPath,
+      `${JSON.stringify(xrayConfig(plan, certificate), null, 2)}\n`,
+      0o600
+    )
+    prepareRuntimeLogs()
+    run(
+      runtimeBinary,
+      ['run', '-test', '-config', runtimeConfigPath],
+      true,
+      'Generated Xray configuration is invalid'
+    )
+    atomicWrite(unitPath, systemdUnit(), 0o644)
+    systemctl('daemon-reload')
+    systemctl('enable', 'eagleway-xray.service')
+    systemctl('restart', 'eagleway-xray.service')
+    run(
+      '/usr/bin/systemctl',
+      ['is-active', '--quiet', 'eagleway-xray.service'],
+      true,
+      'Xray runtime failed to start'
+    )
+    reconcileFirewallPorts([80, plan.port])
+    rmSync(extractDir, { recursive: true, force: true })
+  } catch (error) {
+    restoreFirewallManifest(previousFirewall)
+    throw error
+  }
 }
 
 async function applyConfig(plan: InstallPlan): Promise<void> {
@@ -190,60 +223,68 @@ async function applyConfig(plan: InstallPlan): Promise<void> {
   if (!isManagedRuntime() || !existsSync(runtimeConfigPath)) {
     fail('Managed Xray runtime is not installed')
   }
-  const certificate = ensureCertificate(plan)
-  const candidatePath = join(runtimeDir, `.config.next-${process.pid}.json`)
-  const backupPath = join(runtimeDir, `.config.backup-${process.pid}.json`)
-  atomicWrite(
-    candidatePath,
-    `${JSON.stringify(xrayConfig(plan, certificate), null, 2)}\n`,
-    0o600
-  )
-  prepareRuntimeLogs()
-  const validation = run(
-    runtimeBinary,
-    ['run', '-test', '-config', candidatePath],
-    false
-  )
-  if (validation.error || validation.status !== 0) {
-    safeRemove(candidatePath)
-    fail('Candidate Xray configuration is invalid')
-  }
-
-  const wasActive =
-    run(
-      '/usr/bin/systemctl',
-      ['is-active', '--quiet', 'eagleway-xray.service'],
-      false
-    ).status === 0
-  copyFileSync(runtimeConfigPath, backupPath)
-  chmodSync(backupPath, 0o600)
-  renameSync(candidatePath, runtimeConfigPath)
-  chmodSync(runtimeConfigPath, 0o600)
-  if (wasActive) {
-    const restarted = run(
-      '/usr/bin/systemctl',
-      ['restart', 'eagleway-xray.service'],
+  const previousFirewall = readFirewallManifest()
+  try {
+    ensureFirewallPorts([80, plan.port])
+    const certificate = ensureCertificate(plan)
+    const candidatePath = join(runtimeDir, `.config.next-${process.pid}.json`)
+    const backupPath = join(runtimeDir, `.config.backup-${process.pid}.json`)
+    atomicWrite(
+      candidatePath,
+      `${JSON.stringify(xrayConfig(plan, certificate), null, 2)}\n`,
+      0o600
+    )
+    prepareRuntimeLogs()
+    const validation = run(
+      runtimeBinary,
+      ['run', '-test', '-config', candidatePath],
       false
     )
-    const active = run(
-      '/usr/bin/systemctl',
-      ['is-active', '--quiet', 'eagleway-xray.service'],
-      false
-    )
-    if (
-      restarted.error ||
-      restarted.status !== 0 ||
-      active.error ||
-      active.status !== 0
-    ) {
-      copyFileSync(backupPath, runtimeConfigPath)
-      chmodSync(runtimeConfigPath, 0o600)
-      run('/usr/bin/systemctl', ['restart', 'eagleway-xray.service'], false)
-      safeRemove(backupPath)
-      fail('Xray configuration update failed and was rolled back')
+    if (validation.error || validation.status !== 0) {
+      safeRemove(candidatePath)
+      fail('Candidate Xray configuration is invalid')
     }
+
+    const wasActive =
+      run(
+        '/usr/bin/systemctl',
+        ['is-active', '--quiet', 'eagleway-xray.service'],
+        false
+      ).status === 0
+    copyFileSync(runtimeConfigPath, backupPath)
+    chmodSync(backupPath, 0o600)
+    renameSync(candidatePath, runtimeConfigPath)
+    chmodSync(runtimeConfigPath, 0o600)
+    if (wasActive) {
+      const restarted = run(
+        '/usr/bin/systemctl',
+        ['restart', 'eagleway-xray.service'],
+        false
+      )
+      const active = run(
+        '/usr/bin/systemctl',
+        ['is-active', '--quiet', 'eagleway-xray.service'],
+        false
+      )
+      if (
+        restarted.error ||
+        restarted.status !== 0 ||
+        active.error ||
+        active.status !== 0
+      ) {
+        copyFileSync(backupPath, runtimeConfigPath)
+        chmodSync(runtimeConfigPath, 0o600)
+        run('/usr/bin/systemctl', ['restart', 'eagleway-xray.service'], false)
+        safeRemove(backupPath)
+        fail('Xray configuration update failed and was rolled back')
+      }
+    }
+    safeRemove(backupPath)
+    reconcileFirewallPorts([80, plan.port])
+  } catch (error) {
+    restoreFirewallManifest(previousFirewall)
+    throw error
   }
-  safeRemove(backupPath)
 }
 
 function uninstall(): void {
@@ -253,6 +294,7 @@ function uninstall(): void {
     ['disable', '--now', 'eagleway-xray.service'],
     false
   )
+  removeManagedFirewallRules()
   safeRemove(unitPath)
   safeRemove(runtimeBinary)
   if (
@@ -510,7 +552,11 @@ function xrayConfig(
     stats: {},
     policy: {
       levels: {
-        '0': { statsUserUplink: true, statsUserDownlink: true }
+        '0': {
+          statsUserUplink: true,
+          statsUserDownlink: true,
+          statsUserOnline: true
+        }
       }
     },
     inbounds: [
@@ -584,6 +630,327 @@ function prepareRuntimeLogs(): void {
       closeSync(file)
     }
   }
+}
+
+function ensureFirewallPorts(ports: number[]): void {
+  const required = normalizedFirewallPorts(ports)
+  const manager = activeFirewallManager()
+  if (!manager) return
+  const manifest = readFirewallManifest()
+
+  if (manager.type === 'ufw') {
+    for (const port of required) {
+      let status = ufwStatus(manager.path)
+      if (ufwOwnedRuleNumbers(status, port).length) {
+        if (!hasFirewallRule(manifest, { manager: 'ufw', port })) {
+          manifest.rules.push({ manager: 'ufw', port })
+          writeFirewallManifest(manifest)
+        }
+        continue
+      }
+      if (ufwAllowsTcpPort(status, port)) continue
+      run(
+        manager.path,
+        ['--force', 'allow', `${port}/tcp`, 'comment', XRAY_FIREWALL_COMMENT],
+        true,
+        `Failed to open TCP port ${port} with UFW`
+      )
+      manifest.rules.push({ manager: 'ufw', port })
+      writeFirewallManifest(manifest)
+      status = ufwStatus(manager.path)
+      if (!ufwOwnedRuleNumbers(status, port).length) {
+        fail(`UFW did not open TCP port ${port}`)
+      }
+    }
+    return
+  }
+
+  for (const port of required) {
+    const runtimeOpen = firewalldPortOpen(
+      manager.path,
+      manager.zone,
+      port,
+      false
+    )
+    const permanentOpen = firewalldPortOpen(
+      manager.path,
+      manager.zone,
+      port,
+      true
+    )
+    if (runtimeOpen && permanentOpen) continue
+    let rule = manifest.rules.find(
+      (item): item is Extract<FirewallRule, { manager: 'firewalld' }> =>
+        item.manager === 'firewalld' &&
+        item.port === port &&
+        item.zone === manager.zone
+    )
+    if (!rule) {
+      rule = {
+        manager: 'firewalld',
+        port,
+        zone: manager.zone,
+        runtimeAdded: false,
+        permanentAdded: false
+      }
+      manifest.rules.push(rule)
+    }
+    if (!permanentOpen) {
+      run(
+        manager.path,
+        ['--permanent', `--zone=${manager.zone}`, `--add-port=${port}/tcp`],
+        true,
+        `Failed to persist TCP port ${port} with firewalld`
+      )
+      rule.permanentAdded = true
+      writeFirewallManifest(manifest)
+    }
+    if (!runtimeOpen) {
+      run(
+        manager.path,
+        [`--zone=${manager.zone}`, `--add-port=${port}/tcp`],
+        true,
+        `Failed to open TCP port ${port} with firewalld`
+      )
+      rule.runtimeAdded = true
+      writeFirewallManifest(manifest)
+    }
+  }
+}
+
+function reconcileFirewallPorts(ports: number[]): void {
+  const required = new Set(normalizedFirewallPorts(ports))
+  const manifest = readFirewallManifest()
+  const obsolete = manifest.rules.filter((rule) => !required.has(rule.port))
+  for (const rule of obsolete) removeFirewallRule(rule)
+  manifest.rules = manifest.rules.filter((rule) => required.has(rule.port))
+  writeFirewallManifest(manifest)
+}
+
+function restoreFirewallManifest(previous: FirewallManifest): void {
+  const current = readFirewallManifest()
+  for (const rule of current.rules) {
+    const prior = previous.rules.find(
+      (item) => firewallRuleKey(item) === firewallRuleKey(rule)
+    )
+    if (!prior) {
+      removeFirewallRule(rule)
+      continue
+    }
+    if (rule.manager === 'firewalld' && prior.manager === 'firewalld') {
+      const addedDuringOperation: FirewallRule = {
+        ...rule,
+        runtimeAdded: rule.runtimeAdded && !prior.runtimeAdded,
+        permanentAdded: rule.permanentAdded && !prior.permanentAdded
+      }
+      if (
+        addedDuringOperation.runtimeAdded ||
+        addedDuringOperation.permanentAdded
+      ) {
+        removeFirewallRule(addedDuringOperation)
+      }
+    }
+  }
+  writeFirewallManifest(previous)
+}
+
+function removeManagedFirewallRules(): void {
+  const manifest = readFirewallManifest()
+  for (const rule of manifest.rules) removeFirewallRule(rule)
+  safeRemove(firewallManifestPath)
+}
+
+function removeFirewallRule(rule: FirewallRule): void {
+  if (rule.manager === 'ufw') {
+    const executable = ufwExecutable()
+    if (!executable) fail('UFW is unavailable while removing managed rules')
+    const numbers = ufwOwnedRuleNumbers(ufwStatus(executable), rule.port)
+    for (const number of numbers) {
+      run(
+        executable,
+        ['--force', 'delete', String(number)],
+        true,
+        `Failed to remove managed UFW rule for TCP port ${rule.port}`
+      )
+    }
+    return
+  }
+
+  const executable = firewalldExecutable()
+  if (!executable) {
+    fail('firewalld is unavailable while removing managed rules')
+  }
+  if (
+    rule.runtimeAdded &&
+    firewalldPortOpen(executable, rule.zone, rule.port, false)
+  ) {
+    run(
+      executable,
+      [`--zone=${rule.zone}`, `--remove-port=${rule.port}/tcp`],
+      true,
+      `Failed to remove managed firewalld rule for TCP port ${rule.port}`
+    )
+  }
+  if (
+    rule.permanentAdded &&
+    firewalldPortOpen(executable, rule.zone, rule.port, true)
+  ) {
+    run(
+      executable,
+      ['--permanent', `--zone=${rule.zone}`, `--remove-port=${rule.port}/tcp`],
+      true,
+      `Failed to remove managed permanent firewalld rule for TCP port ${rule.port}`
+    )
+  }
+}
+
+function activeFirewallManager():
+  | { type: 'ufw'; path: string }
+  | { type: 'firewalld'; path: string; zone: string }
+  | null {
+  const ufw = ufwExecutable()
+  const ufwActive = Boolean(ufw && ufwIsActive(ufwStatus(ufw)))
+  const firewalld = firewalldExecutable()
+  const firewalldActive = Boolean(
+    firewalld &&
+    run('/usr/bin/systemctl', ['is-active', '--quiet', 'firewalld'], false)
+      .status === 0
+  )
+  if (ufwActive && firewalldActive) {
+    fail('Multiple supported host firewalls are active')
+  }
+  if (ufwActive) return { type: 'ufw', path: ufw! }
+  if (!firewalldActive) return null
+  const zone = runCapture(
+    firewalld!,
+    ['--get-default-zone'],
+    true,
+    'Failed to determine the active firewalld zone'
+  ).stdout.trim()
+  if (!/^[A-Za-z0-9_-]+$/.test(zone)) {
+    fail('firewalld returned an invalid default zone')
+  }
+  return { type: 'firewalld', path: firewalld!, zone }
+}
+
+function ufwStatus(executable: string): string {
+  return runCapture(
+    executable,
+    ['status', 'numbered'],
+    true,
+    'Failed to inspect UFW rules'
+  ).stdout
+}
+
+function firewalldPortOpen(
+  executable: string,
+  zone: string,
+  port: number,
+  permanent: boolean
+): boolean {
+  const args = [
+    ...(permanent ? ['--permanent'] : []),
+    `--zone=${zone}`,
+    `--query-port=${port}/tcp`
+  ]
+  return runCapture(executable, args, false).status === 0
+}
+
+function ufwExecutable(): string | null {
+  return ['/usr/sbin/ufw', '/usr/bin/ufw'].find(existsSync) ?? null
+}
+
+function firewalldExecutable(): string | null {
+  return existsSync('/usr/bin/firewall-cmd') ? '/usr/bin/firewall-cmd' : null
+}
+
+function normalizedFirewallPorts(ports: number[]): number[] {
+  const unique = [...new Set(ports)].sort((left, right) => left - right)
+  if (
+    unique.some((port) => !Number.isInteger(port) || port < 1 || port > 65_535)
+  ) {
+    fail('Firewall port is invalid')
+  }
+  return unique
+}
+
+function readFirewallManifest(): FirewallManifest {
+  if (!existsSync(firewallManifestPath)) {
+    return { schemaVersion: 1, rules: [] }
+  }
+  let value: unknown
+  try {
+    value = JSON.parse(readFileSync(firewallManifestPath, 'utf8'))
+  } catch {
+    fail('Managed firewall manifest is invalid')
+  }
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    (value as Record<string, unknown>).schemaVersion !== 1 ||
+    !Array.isArray((value as Record<string, unknown>).rules)
+  ) {
+    fail('Managed firewall manifest is invalid')
+  }
+  const rules = (value as { rules: unknown[] }).rules
+  if (!rules.every(isFirewallRule)) {
+    fail('Managed firewall manifest contains an invalid rule')
+  }
+  return { schemaVersion: 1, rules }
+}
+
+function isFirewallRule(value: unknown): value is FirewallRule {
+  if (!value || typeof value !== 'object') return false
+  const rule = value as Record<string, unknown>
+  if (
+    !Number.isInteger(rule.port) ||
+    Number(rule.port) < 1 ||
+    Number(rule.port) > 65_535
+  ) {
+    return false
+  }
+  if (rule.manager === 'ufw') {
+    return Object.keys(rule).every((key) => ['manager', 'port'].includes(key))
+  }
+  return (
+    rule.manager === 'firewalld' &&
+    typeof rule.zone === 'string' &&
+    /^[A-Za-z0-9_-]+$/.test(rule.zone) &&
+    typeof rule.runtimeAdded === 'boolean' &&
+    typeof rule.permanentAdded === 'boolean' &&
+    Object.keys(rule).every((key) =>
+      ['manager', 'port', 'zone', 'runtimeAdded', 'permanentAdded'].includes(
+        key
+      )
+    )
+  )
+}
+
+function writeFirewallManifest(manifest: FirewallManifest): void {
+  if (!manifest.rules.length) {
+    safeRemove(firewallManifestPath)
+    return
+  }
+  atomicWrite(
+    firewallManifestPath,
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    0o600
+  )
+}
+
+function hasFirewallRule(
+  manifest: FirewallManifest,
+  expected: FirewallRule
+): boolean {
+  return manifest.rules.some(
+    (rule) => firewallRuleKey(rule) === firewallRuleKey(expected)
+  )
+}
+
+function firewallRuleKey(rule: FirewallRule): string {
+  return rule.manager === 'ufw'
+    ? `${rule.manager}:${rule.port}`
+    : `${rule.manager}:${rule.zone}:${rule.port}`
 }
 
 function readPlan(
@@ -712,6 +1079,27 @@ function run(
     encoding: 'utf8',
     timeout: 15 * 60 * 1000,
     maxBuffer: 1024 * 1024
+  })
+  if (required && (result.error || result.status !== 0)) {
+    const detail = result.stderr?.replace(/\s+/g, ' ').trim().slice(-500)
+    fail(detail ? `${failureMessage}: ${detail}` : failureMessage)
+  }
+  return result
+}
+
+function runCapture(
+  executable: string,
+  args: string[],
+  required = true,
+  failureMessage = 'Privileged host command failed'
+): SpawnSyncReturns<string> {
+  const result = spawnSync(executable, args, {
+    shell: false,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    encoding: 'utf8',
+    timeout: 60_000,
+    maxBuffer: 256 * 1024,
+    env: { ...process.env, LC_ALL: 'C' }
   })
   if (required && (result.error || result.status !== 0)) {
     const detail = result.stderr?.replace(/\s+/g, ' ').trim().slice(-500)

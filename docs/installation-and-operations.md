@@ -87,9 +87,10 @@ helper 不接受任意命令字符串、任意 unit、任意目标路径或 shel
 5. 原子安装二进制、配置和 systemd unit。
 6. 获取或引用证书。
 7. 写入独立 Nginx 配置；先执行配置检查，再 reload。
-8. 启动 Xray-core 并验证 systemd、端口和仅监听 loopback 的 gRPC API。
-9. 记录 owned_resources。
-10. 标记 operation 完成。
+8. 如果 UFW 或 firewalld 已启用，自动放行 TCP 80 和协议端口，并记录 Agent 创建的规则。
+9. 启动 Xray-core 并验证 systemd、端口和仅监听 loopback 的 gRPC API。
+10. 记录 owned_resources。
+11. 标记 operation 完成。
 
 禁止覆盖 `/etc/nginx/nginx.conf`，禁止关闭 SELinux（第一阶段也不支持 RHEL），禁止执行来自网络的未固定脚本。
 

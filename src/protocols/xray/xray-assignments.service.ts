@@ -127,11 +127,21 @@ export class XrayAssignmentsService implements OnApplicationBootstrap {
   }
 
   async traffic(protocol: XrayProtocol, reportedAt: string) {
-    const [runtimeUsers, counters, runtimeEpoch] = await Promise.all([
-      this.client.listUserIds(protocol),
-      this.client.userTraffic(),
-      this.client.invocationId()
-    ])
+    const [runtimeUsers, counters, runtimeEpoch, onlineRuntimeUsers] =
+      await Promise.all([
+        this.client.listUserIds(protocol),
+        this.client.userTraffic(),
+        this.client.invocationId(),
+        this.client.listOnlineUserIds()
+      ])
+    const runtimeUserSet = new Set(runtimeUsers)
+    const onlineAssignmentIds = new Set(
+      onlineRuntimeUsers.flatMap((userId) => {
+        if (!runtimeUserSet.has(userId)) return []
+        const assignmentId = assignmentIdFromRuntimeUserId(protocol, userId)
+        return assignmentId ? [assignmentId] : []
+      })
+    )
     const users = runtimeUsers.flatMap((userId) => {
       const assignmentId = assignmentIdFromRuntimeUserId(protocol, userId)
       if (!assignmentId) return []
@@ -148,6 +158,7 @@ export class XrayAssignmentsService implements OnApplicationBootstrap {
       reportedAt,
       runtimeEpoch,
       managedUserCount: runtimeUsers.length,
+      onlineUserCount: onlineAssignmentIds.size,
       users
     }
   }

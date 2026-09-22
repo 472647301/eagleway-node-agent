@@ -24,6 +24,9 @@ import { PrivilegedHelperService } from '@/host/privileged-helper.service'
 import { StateStoreService } from '@/state/state-store.service'
 import { XRAY_PROTOCOLS, type XrayProtocol } from './xray.types'
 
+const XRAY_FIREWALL_MANIFEST =
+  '/etc/eagleway-node-agent/runtimes/xray/firewall-rules.json'
+
 export interface XrayInstallInput {
   nodeId: number
   protocol: XrayProtocol
@@ -104,6 +107,9 @@ export class XrayProvisioningService {
           'runtime-config',
           '/etc/eagleway-node-agent/runtimes/xray/config.json'
         ],
+        ...(existsSync(XRAY_FIREWALL_MANIFEST)
+          ? ([['firewall-manifest', XRAY_FIREWALL_MANIFEST]] as string[][])
+          : []),
         ...(isManagedFile(
           CERTBOT_XRAY_DEPLOY_HOOK,
           EAGLEWAY_CERTBOT_HOOK_MARKER
@@ -151,6 +157,15 @@ export class XrayProvisioningService {
     })
     try {
       await this.helper.run('xray-apply-config', planPath)
+      if (existsSync(XRAY_FIREWALL_MANIFEST)) {
+        this.state.registerOwnedResource({
+          resourceType: 'firewall-manifest',
+          resourceName: XRAY_FIREWALL_MANIFEST,
+          ownershipTag: 'eagleway-node-agent:xray',
+          createdAt: new Date().toISOString(),
+          removedAt: null
+        })
+      }
       if (acmeConfigPath && isManagedNginxConfig(acmeConfigPath)) {
         this.state.registerOwnedResource({
           resourceType: 'nginx-config',

@@ -93,6 +93,7 @@
 
 - 累计字节和速度采集。
 - managedUserCount 与 Xray 入站用户列表一致性验证。
+- onlineUserCount 与 Xray 当前在线受管用户列表一致性验证。
 - bigint 字符串转换。
 - reportedAt 单调性。
 - 中心 204 上报、超时和退避。

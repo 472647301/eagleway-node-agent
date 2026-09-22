@@ -17,6 +17,12 @@ import {
   baotaAcmeWebroot,
   inspectNginxDomain
 } from '@/host/nginx-acme'
+import {
+  XRAY_FIREWALL_COMMENT,
+  ufwAllowsTcpPort,
+  ufwIsActive,
+  ufwOwnedRuleNumbers
+} from '@/host/firewall-rules'
 
 test('Ubuntu os-release parser handles quoted values', () => {
   assert.deepEqual(
@@ -48,6 +54,26 @@ test('Linux TCP table parser only recognizes listening ports', () => {
   ].join('\n')
   assert.equal(tcpTableHasListeningPort(table, 80), true)
   assert.equal(tcpTableHasListeningPort(table, 9443), false)
+})
+
+test('UFW parser distinguishes existing and Eagleway-owned TCP rules', () => {
+  const status = [
+    'Status: active',
+    '',
+    '     To                         Action      From',
+    '     --                         ------      ----',
+    '[ 1] 22/tcp                     ALLOW IN    Anywhere',
+    '[ 2] 80/tcp                     ALLOW IN    Anywhere                   # existing',
+    `[ 3] 9443/tcp                   ALLOW IN    Anywhere                   # ${XRAY_FIREWALL_COMMENT}`,
+    `[ 4] 9443/tcp (v6)              ALLOW IN    Anywhere (v6)              # ${XRAY_FIREWALL_COMMENT}`
+  ].join('\n')
+
+  assert.equal(ufwIsActive(status), true)
+  assert.equal(ufwAllowsTcpPort(status, 80), true)
+  assert.equal(ufwAllowsTcpPort(status, 9443), true)
+  assert.equal(ufwAllowsTcpPort(status, 443), false)
+  assert.deepEqual(ufwOwnedRuleNumbers(status, 9443), [4, 3])
+  assert.deepEqual(ufwOwnedRuleNumbers(status, 80), [])
 })
 
 test('BaoTa Nginx parser finds an exact domain and quoted webroot', () => {

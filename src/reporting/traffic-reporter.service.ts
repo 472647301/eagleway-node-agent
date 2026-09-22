@@ -78,7 +78,9 @@ export class TrafficReporterService
       this.logger.log({
         event: 'traffic.report_succeeded',
         reportedAt: report.reportedAt,
-        users: report.users.length
+        users: report.users.length,
+        managedUserCount: report.managedUserCount,
+        onlineUserCount: report.onlineUserCount
       })
     } catch (error) {
       this.consecutiveFailures += 1

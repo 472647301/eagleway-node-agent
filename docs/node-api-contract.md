@@ -274,6 +274,7 @@ Agent 不返回 offline。中心请求超时或连接失败时，由中心将节
   "reportedAt": "2026-09-04T01:05:00.000Z",
   "runtimeEpoch": "6f01dc9dc1294fd3a463f521cb24f1ee",
   "managedUserCount": 2,
+  "onlineUserCount": 1,
   "users": [
     {
       "assignmentId": "10c970c5-7fa4-4389-a12f-3f6802aeeb79",
@@ -287,6 +288,7 @@ Agent 不返回 offline。中心请求超时或连接失败时，由中心将节
 - `runtimeEpoch` 是 `eagleway-xray.service` 的 systemd InvocationID。
 - 服务器带宽由中心 API 自行维护，不属于 Agent 流量响应。
 - `managedUserCount` 是 Xray HandlerService 返回的目标入站实际用户条目数，不是中心数据库计数，也不是在线连接数。
+- `onlineUserCount` 是采样时至少有一个活动连接的受管 Xray 用户数，不是连接数或设备数。
 - `users` 只包含 email 符合受管格式且能严格解析出 UUID assignmentId 的实际运行时用户。
 
 ## 8. 日志接口

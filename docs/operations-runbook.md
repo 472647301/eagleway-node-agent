@@ -74,7 +74,7 @@ Node.apiEndpoint 是 Agent 控制地址，例如 http://node-ip:8086；它不是
 - root 或 sudo 权限。
 - 能访问系统 apt 源、npm 源和 XTLS GitHub Release。
 - 域名具有 A 或 AAAA 记录。
-- 云安全组按需放行 TCP 80、Agent 控制端口和协议端口。
+- 云安全组按需放行 TCP 80、Agent 控制端口和协议端口；已启用的 UFW 或 firewalld 由 Agent 自动放行 80 和协议端口。
 - Agent 控制端口只允许中心出口 IP，不得对整个公网开放。
 - 普通 Ubuntu 首次签发证书时需要 TCP 80；已有可复用证书时可跳过签发。
 - 宝塔环境缺少证书时，Agent 会优先复用目标域名站点的 Nginx WebRoot；如果不存在该域名站点，则在宝塔 vhost 目录创建带所有权标记的最小 ACME 站点，再执行 HTTP-01。`bt` 命令没有稳定的按域名签发接口，Agent 不调用版本相关的菜单编号。
@@ -150,8 +150,8 @@ git pull --ff-only
 pnpm verify
 git status --short
 git push origin main
-git tag -a v0.1.6 -m "release: v0.1.6"
-git push origin v0.1.6
+git tag -a v0.1.7 -m "release: v0.1.7"
+git push origin v0.1.7
 ~~~
 
 `git status --short` 应无输出。推送 `v*` tag 后，在以下地址查看构建进度：
@@ -159,7 +159,7 @@ git push origin v0.1.6
 - https://github.com/472647301/eagleway-node-agent/actions/workflows/release.yml
 - https://github.com/472647301/eagleway-node-agent/releases
 
-不要移动或强制覆盖已经发布的 tag。发布内容需要修正时，提交修复并创建新的递增版本 tag，例如 `v0.1.6`。
+不要移动或强制覆盖已经发布的 tag。发布内容需要修正时，提交修复并创建新的递增版本 tag，例如 `v0.1.7`。
 
 ### 5.2 VPS 首次部署
 
@@ -168,7 +168,7 @@ Release workflow 在 `ubuntu-22.04` x64/arm64 runner 上构建对应架构的生
 等待 GitHub Release 中出现 x64 和 arm64 产物后，在 VPS 执行：
 
 ~~~bash
-TAG=v0.1.6
+TAG=v0.1.7
 curl -fsSL "https://raw.githubusercontent.com/472647301/eagleway-node-agent/${TAG}/scripts/deploy-ubuntu-release.sh" -o /tmp/eagleway-deploy.sh
 bash /tmp/eagleway-deploy.sh "${TAG}"
 ~~~
@@ -411,10 +411,11 @@ post_agent "/api/$PROTOCOL/traffic" "{\"nodeId\":$NODE_ID}"
 
 - runtimeEpoch 是 32 位十六进制 systemd InvocationID。
 - managedUserCount 与 Xray 实际入站用户数一致。
+- onlineUserCount 与采样时存在活动连接的受管用户数一致。
 - uploadBytes 和 downloadBytes 是十进制字符串，不是 JSON number。
 - 本机没有真实代理请求时，计数为 0 是正常的。
 
-要验证计数增长，必须从外部客户端使用同步后的 credential 建立真实 Trojan/VLESS/VMess 连接并产生上下行流量，然后再次查询。
+要验证在线人数和计数增长，必须从外部客户端使用同步后的 credential 建立真实 Trojan/VLESS/VMess 连接并产生上下行流量，然后再次查询；断开所有连接后 onlineUserCount 应恢复为 0。
 
 ### 7.7 日志 API
 
@@ -548,7 +549,7 @@ printf '%s\n' "$BACKUP_DIR"
 公开仓库无需 deploy key、源码 checkout、pnpm 或开发依赖。确认对应 tag 的 Release workflow 成功后执行：
 
 ~~~bash
-bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.1.6
+bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.1.7
 ~~~
 
 脚本会自动选择本机架构并验证 SHA-256。需要部署指定配置文件时，将其作为第二个参数传入。
@@ -749,7 +750,7 @@ sudo certbot renew --dry-run
 sudo bash /opt/eagleway-node-agent/current/scripts/uninstall-ubuntu.sh
 ~~~
 
-输入 `uninstall` 后，脚本会停止并删除 PM2 进程和 startup unit，通过受限 helper 删除带 Eagleway 所有权标记的 Xray 资源，删除当前配置对应的 UFW allow 规则，然后删除 helper、sudoers、release、配置、state.key、SQLite、日志和 `eagleway-agent` 用户。脚本可重复执行；如果检测到受管 Xray 标记但可信 helper 已丢失，会停止而不是盲目删除系统资源。
+输入 `uninstall` 后，脚本会停止并删除 PM2 进程和 startup unit，通过受限 helper 删除带 Eagleway 所有权标记的 Xray 资源以及 UFW/firewalld 规则，然后删除 helper、sudoers、release、配置、state.key、SQLite、日志和 `eagleway-agent` 用户。脚本可重复执行；如果检测到受管 Xray 标记但可信 helper 已丢失，会停止而不是盲目删除系统资源。
 
 无人值守或保留数据：
 
