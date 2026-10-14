@@ -2,21 +2,21 @@
 
 Eagleway Node Agent 是 Eagleway Network VPN 代理应用部署在自有 VPS 上的节点控制代理。中心接口端位于私有仓库 `eagleway-network-api`；Agent 接收中心控制请求，管理本机协议运行时和用户，并向中心服务上报流量快照。
 
-项目当前已经进入 MVP 实施阶段。已实现节点 API、SQLite 状态、Xray-core 三协议用户适配、流量上报、日志读取、Ubuntu/宝塔预检和受限提权 helper；真实 Ubuntu 与宝塔 VPS 灰度仍是发布前门槛。
+当前代码已实现节点 API、SQLite 状态、Xray-core 三协议用户适配、流量上报、日志读取、Ubuntu/宝塔预检和受限提权 helper。当前发布包是否可投产，以 Ubuntu 与宝塔 VPS 灰度及中心联调记录为准，见[上线验收](docs/release-acceptance.md)。
 
 ## 项目定位
 
 - 项目名：`eagleway-node-agent`
-- 第一阶段协议：Trojan、VLESS、VMess
+- 当前版本协议：Trojan、VLESS、VMess
 - 统一运行时：`xray-core`
 - 中心服务：`eagleway-network-api`
 - 部署方式：PM2 fork 单实例
 - 本地状态：SQLite
-- 第一阶段操作系统：Ubuntu、Ubuntu + 宝塔
+- 当前版本操作系统：Ubuntu、Ubuntu + 宝塔
 
 Agent 不是中心数据库的副本。中心服务始终是节点配置、用户分配和流量账本的事实源；SQLite 仅用于保存本机执行状态、用户与运行时标识映射、上报游标和资源所有权。
 
-## 第一阶段范围
+## 当前版本范围
 
 包含：
 
@@ -30,7 +30,6 @@ Agent 不是中心数据库的副本。中心服务始终是节点配置、用�
 
 不包含：
 
-- 对旧 `trojan-api` 的接口兼容。
 - CentOS/RHEL 支持。
 - Shadowsocks 实现。
 - 443 端口上的 TLS/SNI 多路复用。
@@ -41,16 +40,17 @@ Agent 不是中心数据库的副本。中心服务始终是节点配置、用�
 ## 文档
 
 - [运维与服务器自测手册](docs/operations-runbook.md)
-- [架构设计](docs/architecture.md)
+- [当前架构](docs/architecture.md)
 - [节点 API 契约](docs/node-api-contract.md)
-- [安装与运维设计](docs/installation-and-operations.md)
-- [中心 API 配套改造](docs/central-api-integration.md)
-- [实施与验收计划](docs/implementation-plan.md)
-- [已确认的设计决策](docs/decisions.md)
+- [当前安装与运维边界](docs/installation-and-operations.md)
+- [当前中心 API 集成](docs/central-api-integration.md)
+- [上线验收清单](docs/release-acceptance.md)
+- [文档索引与维护原则](docs/README.md)
+- [当前运行边界](docs/decisions.md)
 
 ## 安全基线
 
-第一阶段使用中心固定出口 IP 白名单限制控制接口访问。公网传输仍建议使用 HTTPS；如果暂时使用 HTTP，必须同时在云安全组和主机防火墙限制来源，不得将控制端口开放给任意公网地址。
+当前版本使用中心固定出口 IP 白名单限制控制接口访问。公网传输仍建议使用 HTTPS；如果暂时使用 HTTP，必须同时在云安全组和主机防火墙限制来源，不得将控制端口开放给任意公网地址。
 
 用户 credential、证书私钥、完整连接配置和命令参数不得写入普通日志。`assignmentId` 是非秘密的稳定业务标识。
 
@@ -136,5 +136,6 @@ sudo bash /opt/eagleway-node-agent/current/scripts/uninstall-ubuntu.sh
 
 ## 当前验收状态
 
-- 本地类型检查、Nest 构建和自动化测试已覆盖配置、SQLite、加密、日志边界、IP 处理以及 Xray protobuf 大整数计数。
-- 普通 Ubuntu 和宝塔的真实 VPS 生命周期灰度尚未完成，因此当前版本是可联调 MVP，不应直接批量投产。
+- 当前类型检查、Nest 构建和自动化测试的入口为 `pnpm verify`；测试用例覆盖配置、SQLite、加密、日志边界、IP 处理以及 Xray protobuf 大整数计数。
+- 当前发布包的真实 Ubuntu/宝塔生命周期、中心联调和实际代理流量结果需按[上线验收](docs/release-acceptance.md)记录；历史源码或其他 release 的检查不能替代当前部署证据。
+- 本次文档核对未重新运行服务器灰度或发布 workflow，不更新实测通过结论。

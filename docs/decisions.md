@@ -1,94 +1,15 @@
-# 已确认的设计决策
+# 当前运行边界
 
-状态：Accepted  
-更新时间：2026-09-04
+核对日期：2026-10-14。本文列出当前源码和部署配置的边界；未来能力需单独确定需求并实现，不能由历史方案推定存在。
 
-## 1. 产品与命名
+- 支持 Ubuntu x64/arm64、Ubuntu 宝塔 Nginx，运行协议为 Trojan/VLESS/VMess，共用 Xray。每台 VPS 同时一种协议。
+- Agent 为 PM2 fork 单实例，Xray 为 systemd 服务；不使用中心数据库，本地 SQLite 保存执行状态及加密凭据。
+- 中心业务事实和完整期望用户集合由当前 API 维护；users/sync 的空数组删除运行时全部用户。
+- 配置应用、安装和卸载异步，启停同步；配置修订和生命周期状态分别维护。
+- 控制及日志接口按来源 CIDR 限制，未实现应用层 HMAC/JWT；健康接口当前不应用 CIDR 守卫。
+- 上报累计字节和 runtimeEpoch，并报告实际受管用户条目数和有活动连接的用户数；不执行额度超限删除或实时速率策略。
+- 当前 status.startedAt 为 null；中心展示的启动时间可能为首次确认在线的估计。
+- 中断操作标记失败，状态查询可收敛实际结果；没有通用阶段续跑、数据库损坏自动修复或部署自动回滚。
+- 当前不实现 Shadowsocks、CentOS/RHEL、443 TLS/SNI 多路复用或 Agent 远程自更新。
 
-- 仓库名、npm 包基础名和进程名统一使用 `eagleway-node-agent`。
-- Agent 是通用节点控制代理，不以 Trojan 作为永久项目边界。
-- 第一阶段同时实现 Trojan、VLESS、VMess，统一使用 `xray-core`。
-- HTTP 路由保持协议名，三个协议共享 Xray 生命周期、HandlerService 和 StatsService 适配层。
-
-## 2. 兼容范围
-
-- 不兼容旧 `trojan-api` 的 `serverId`、旧用户 DTO、旧签名和旧状态回调。
-- 新接口以 `eagleway-network-api` 的 `NodeControlController`、`NodeClientService` 和节点契约为基础重新冻结。
-- 中心 API 可以为新契约同步调整。
-
-## 3. 系统支持
-
-第一阶段支持：
-
-- Ubuntu。
-- Ubuntu + 宝塔。
-
-第一阶段不支持 CentOS/RHEL。代码边界保留 Host Adapter，未来可以增加 RHEL 系适配器。遇到不支持的系统必须在预检阶段失败，不能部分执行安装。
-
-## 4. 宝塔和端口
-
-- 必须识别宝塔环境并使用独立适配器。
-- 不覆盖宝塔管理的 Nginx/Apache 主配置。
-- 不停止已有网站来抢占端口。
-- 不实现 443 TLS/SNI 多路复用。
-- 目标端口被占用时返回 `PORT_IN_USE`，由管理员修改节点端口后重试。
-- 卸载只能删除 Agent 明确登记为自己创建的资源。
-
-## 5. 域名与证书
-
-- 创建节点时不强制域名已经解析完成。
-- 安装协议前必须执行 DNS、端口、WebRoot 和证书签发条件预检。
-- 预检失败不得进入有副作用的安装阶段。
-- 域名未就绪时返回结构化错误，由管理员修复后重试。
-
-## 6. 控制安全
-
-- 第一阶段不实现旧 HMAC，也不兼容旧签名。
-- 使用中心固定出口 IP 白名单。
-- 云安全组和主机防火墙都应限制来源。
-- 公网环境建议使用 HTTPS；HTTP 只允许作为受限部署方案。
-
-## 7. 进程管理
-
-- 使用 PM2 管理 Agent。
-- `exec_mode` 必须为 fork。
-- `instances` 必须为 1。
-- 禁止 cluster 模式，避免重复调度、并发系统修改和 SQLite 多进程争用。
-- 使用 PM2 startup/save 实现开机启动。
-
-## 8. 状态与长任务
-
-- install 和 uninstall 是异步、持久化操作。
-- start 和 stop 同步执行，并在返回成功前验证真实运行状态。
-- 中心服务轮询 Agent 的 status 接口收敛过渡状态。
-- 相同操作必须幂等；冲突操作返回 409。
-
-## 9. 用户所有权
-
-- 节点不允许存在中心之外的协议用户。
-- `users/sync` 表示完整期望状态。
-- 空用户数组表示删除全部受管协议用户。
-- 重复新增和删除不存在的用户都必须幂等成功。
-- 安装过程中产生的临时 bootstrap 用户必须在首次完整同步后移除。
-
-## 10. 流量
-
-- Agent 上报累计上传/下载字节和 Xray 入站实际用户数；服务器带宽由中心 API 自己维护。
-- 字节计数使用非负十进制字符串，避免 JavaScript 大整数精度损失。
-- 上报携带 systemd InvocationID；中心用它识别 Xray 重启造成的计数器归零。
-- 中心负责持久化日、月和总流量账本。
-- 第一阶段不实现在线人数、IP 限制、实时速率或流量额度策略。
-
-## 11. 用户标识与凭证
-
-- `assignmentId` 是稳定、非秘密的 UUID，用于中心、Agent 和流量快照关联。
-- `credential` 是独立秘密：Trojan 使用高熵随机串，VLESS/VMess 使用 UUID。
-- Xray email 使用 `{protocol}.{assignmentId}@eagleway.internal`，只作为运行时唯一标识和统计键。
-- 中心不保存 Xray 内部 hash；Agent 在 SQLite 中加密保存 credential。
-
-## 12. 本地状态
-
-- 使用 SQLite，不引入独立数据库服务。
-- 中心始终是事实源，SQLite 只保存可重建的节点本地状态。
-- SQLite 保存用户映射、操作状态、上报游标和 Agent 所拥有的系统资源清单。
-- 数据库损坏后允许重建，并通过中心全量同步恢复。
+代码入口见[架构](architecture.md)，协议见[节点契约](node-api-contract.md)，实际运维见[操作手册](operations-runbook.md)。

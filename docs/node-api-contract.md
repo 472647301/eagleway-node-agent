@@ -1,17 +1,18 @@
-# 节点 API 契约
+# 当前节点 API 契约
 
-状态：Draft v0.1  
-更新时间：2026-09-04
+状态：当前源码说明
 
-本文档定义 Eagleway Network API 与 Eagleway Node Agent 之间的目标契约。新项目不兼容旧 `trojan-api`。
+核对日期：2026-10-14
+
+本文档描述当前 Agent Controller、DTO 和 Service 的实际协议，并与当前中心 NodeClient 对照。代码入口见 `src/protocols/xray`、`src/logs`、`src/reporting` 和 `src/common/api`；设备及部署结果见[上线验收](release-acceptance.md)。
 
 ## 1. 基础约定
 
 - 节点基础地址来自中心 `nodes.apiEndpoint`。
-- 第一阶段允许 HTTP 或 HTTPS；公网生产环境建议 HTTPS。
+- 当前版本允许 HTTP 或 HTTPS；公网生产环境建议 HTTPS。
 - 控制端口必须限制为中心固定出口 IP。
 - 所有请求和响应使用 JSON。
-- 除异步 install/uninstall 外，成功响应使用 HTTP 200；异步接受使用 HTTP 202。
+- install/config/apply/uninstall 由 Controller 固定返回 HTTP 202，包括幂等结果；start/stop、用户、状态、流量和日志返回 HTTP 200。
 - DTO 拒绝未知字段。
 - nodeId 必须与 Agent 本机配置的 NODE_ID 一致。
 - 中心默认请求超时应区分短操作和长任务接受请求。
@@ -24,7 +25,7 @@
 {
   "code": 0,
   "data": {},
-  "message": "success"
+  "message": "可选的成功说明"
 }
 ```
 
@@ -78,7 +79,7 @@
 }
 ```
 
-第一阶段 `{protocol}` 接受 `trojan`、`vless`、`vmess`。一台 VPS 同时只安装其中一个协议，但三者统一由 Xray-core 提供。
+当前版本 `{protocol}` 接受 `trojan`、`vless`、`vmess`。一台 VPS 同时只安装其中一个协议，但三者统一由 Xray-core 提供。
 
 处理顺序：
 
@@ -94,7 +95,7 @@
 {
   "code": 0,
   "data": {
-    "operationId": "01J...",
+    "operationId": "80a73fbb-44b0-43ba-a46f-d64d1a89eab9",
     "state": "installing"
   }
 }
@@ -114,7 +115,7 @@
 {
   "code": 0,
   "data": {
-    "operationId": "01J...",
+    "operationId": "80a73fbb-44b0-43ba-a46f-d64d1a89eab9",
     "state": "reconfiguring",
     "acceptedRevision": 4
   }
@@ -125,7 +126,7 @@
 
 `POST /api/{protocol}/uninstall`
 
-请求至少包含 nodeId。卸载异步执行，只删除 Agent 拥有的运行时资源、配置和映射；不得卸载共享 Nginx、宝塔或全局 ACME 工具。
+请求只包含 nodeId，未知字段被 DTO 拒绝。卸载异步执行，只删除 Agent 拥有的运行时资源、配置和映射；不得卸载共享 Nginx、宝塔或全局 ACME 工具。
 
 成功接受返回 HTTP 202 和 operationId。
 
@@ -133,13 +134,13 @@
 
 `POST /api/{protocol}/start`
 
-启动是同步操作。只有运行时服务启动成功、目标端口符合预期后才返回 `online`。
+请求为 `{ "nodeId": 12 }`。启动是同步操作。helper 执行 systemd start，确认 Xray 活动并恢复持久化用户后返回 `online`；当前 start 不另行检查外部协议端口或真实代理请求。
 
 ### 4.5 停止
 
 `POST /api/{protocol}/stop`
 
-停止是同步操作。只有 systemd 服务停止且目标监听已释放后才返回 `stopped`。
+请求为 `{ "nodeId": 12 }`。停止是同步操作。helper 执行 systemd stop，确认 Xray 不活动后返回 `stopped`；目标端口释放需在服务器验收中独立核验。
 
 ## 5. 用户接口
 
@@ -243,7 +244,7 @@ add 表示 upsert。重复请求不得创建重复运行时用户。
     "appliedConfigRevision": null,
     "requiresUserSync": false,
     "activeOperation": {
-      "operationId": "01J...",
+      "operationId": "80a73fbb-44b0-43ba-a46f-d64d1a89eab9",
       "type": "install",
       "stage": "certificate",
       "startedAt": "2026-09-04T01:00:00.000Z"
@@ -255,7 +256,9 @@ add 表示 upsert。重复请求不得创建重复运行时用户。
 
 Agent 不返回 offline。中心请求超时或连接失败时，由中心将节点判断为 offline。
 
-安装失败后 state 为 error，lastError 只包含安全错误码和安全消息。修复外部条件后允许重新 install。
+安装失败后 state 为 error，lastError 包含安全错误码、消息及 finishedAt。修复外部条件后可重试 install。配置应用的过渡状态通过 configState 和 activeOperation 表达；config/apply 接受响应可返回 reconfiguring，status 生命周期不使用它。
+
+当前 startedAt 固定为 null；中心在线查询会使用其已记录或首次确认在线的时间补齐，不代表 Agent 已返回运行时实际启动时间。Agent 重启会将未完成操作标记为 OPERATION_INTERRUPTED，不自动续跑全部阶段。
 
 ## 7. 流量查询
 
@@ -330,25 +333,27 @@ Body 与流量查询 data 一致，但不包含 nodeId。中心反向代理覆�
 
 上报规则：
 
-- 默认周期建议 300 秒，可配置。
+- `REPORT_INTERVAL_SECONDS` 默认 300 秒，范围 10–86400 秒；启用上报时须配置 `CENTER_API_URL`。
 - reportedAt 严格单调递增。
-- 网络失败进行有上限的指数退避。
+- 网络失败设置有上限的指数退避门槛，实际再次尝试由后续周期触发；当前没有为每次退避另建短周期定时器。
 - 204 表示中心接受请求，不代表 Agent 能判断来源 IP 是否匹配。
 - 上报日志不得记录 users 正文。
 
-## 10. 安装预检
+## 10. 安装预检与实际边界
 
-预检是 install 内部无副作用阶段，至少检查：
+`XrayProvisioningService.preflight` 当前检查：
 
-- OS 和版本。
-- 是否为支持的宝塔组合。
-- CPU 架构。
-- 磁盘和内存基本条件。
-- systemd、curl、证书工具等能力。
-- domain DNS 状态。
-- 80、443、目标协议端口和 Agent 控制端口。
-- 现有 Nginx/宝塔站点冲突。
-- 已有证书是否可复用。
-- Agent 是否有权调用受限 helper。
+- Linux Ubuntu、x64/arm64，宝塔存在时必须为 Nginx 组合。
+- 协议端口不是 80 或本机 Xray API 端口；修改端口时确认新端口可用。
+- domain 至少可解析 A 或 AAAA。
+- 普通 Ubuntu 缺少可复用证书且标准 Nginx 未活动时检查 80 端口可用。
 
-任何一项失败都不得创建或覆盖运行时配置。
+预检发生在持久化异步任务创建前，不写运行配置。证书匹配、签发、Nginx 配置、runtime artifact 下载和 helper 操作属于后续异步阶段，失败会记录任务错误。当前没有完整磁盘/内存容量预检，不能声称所有安装条件都已在无副作用阶段验证。
+
+## 11. 访问与字段边界
+
+协议和日志接口使用 `ALLOWED_CIDRS`；健康接口当前不使用来源守卫。`TRUST_PROXY=true` 时只信任 loopback 代理。控制请求当前不要求 HMAC/JWT Header。
+
+用户数组最多 10000 项；assignmentId 为 UUID，credential 为 1–256 字符。协议 DTO 对 nodeId、revision 和端口做整数转换及范围校验；未知字段被拒绝。日志参数默认 page=1、pageSize=100，安全 basename 和 realpath 均校验。
+
+本文为代码行为说明，真实 Ubuntu/宝塔安装、权限、签名 artifact、证书续期及中心流量入账仍需当前 release 的实测证据。

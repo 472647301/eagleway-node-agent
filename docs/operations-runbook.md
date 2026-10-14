@@ -1,9 +1,10 @@
 # Eagleway Node Agent 运维与服务器自测手册
 
-状态：MVP Runbook  
-更新时间：2026-09-08
+状态：当前操作手册
 
-本文面向负责 Eagleway Network 节点服务器的基础运维人员，描述当前版本可以实际执行的部署、验证、升级、回滚和故障定位流程。接口字段的权威定义仍以 [节点 API 契约](node-api-contract.md) 为准。
+核对日期：2026-10-14
+
+本文面向负责 Eagleway Network 节点服务器的基础运维人员，描述当前版本可以实际执行的部署、验证、升级、回滚和故障定位流程。接口字段说明见[当前节点契约](node-api-contract.md)，变更时同时核对 Controller/DTO/Service。上线证据见[当前验收清单](release-acceptance.md)，未勾选不代表已完成。
 
 ## 1. 系统关系与责任边界
 
@@ -26,8 +27,8 @@ Eagleway Node Agent
 - SQLite 是可重建的本机状态，不是中心数据库副本。
 - 一台 VPS 同时只运行 Trojan、VLESS、VMess 中的一种协议。
 - 协议 install/uninstall 管理 Xray 资源，不安装或删除 Agent 自身。
-- 第一阶段只支持 Ubuntu 和 Ubuntu + 宝塔 Nginx，不支持 CentOS/RHEL、宝塔 Apache、Shadowsocks 和 443 SNI 多路复用。
-- 第一阶段没有 HMAC/JWT 节点鉴权，控制面依赖中心固定出口 IP 白名单、云安全组和主机防火墙。
+- 当前版本只支持 Ubuntu 和 Ubuntu + 宝塔 Nginx，不支持 CentOS/RHEL、宝塔 Apache、Shadowsocks 和 443 SNI 多路复用。
+- 当前版本没有 HMAC/JWT 节点鉴权，控制面依赖中心固定出口 IP 白名单、云安全组和主机防火墙。
 
 服务器本机自测不能证明以下事项：
 
@@ -498,7 +499,7 @@ Agent、Node.js、PM2、Nginx、Certbot、证书和其他网站应保留。重�
 1. 将中心固定出口 IP 加入 ALLOWED_CIDRS，同时保留 localhost。
 2. 云安全组和 UFW 只对该出口 IP 开放 Agent 控制端口。
 3. 设置 CENTER_API_URL 和 REPORTING_ENABLED=true。
-4. 重新运行 bootstrap，或同步修改源码 .env 与 /etc 配置后使用 --update-env 重启。
+4. 使用独立 env 文件重新运行 bootstrap，或核对 `/etc/eagleway-node-agent/agent.env` 后使用 --update-env 重启；不要依赖源码目录的 .env。
 5. 在中心发起 install，确认中心状态从 installing 收敛到 online。
 6. 确认 requiresUserSync=true 时中心发送完整 users/sync，即使期望集合为空也必须发送空数组。
 7. 从中心执行用户新增、删除、start、stop、status、traffic 和日志读取。
@@ -643,24 +644,13 @@ systemctl is-enabled eagleway-xray.service
 | 403 Source IP is not allowed | ALLOWED_CIDRS、请求来源、TRUST_PROXY | 先追加正确 CIDR并验证，避免锁死控制面 |
 | NODE_ID_MISMATCH | .env NODE_ID 与中心节点记录 | 修正配置，禁止复用其他节点 ID |
 | PORT_IN_USE | ss 检查具体端口 | 更换协议端口或处理占用进程 |
-| 旧版错误只写 Requested protocol port | 同时检查目标端口和 80 | 更新 Agent；无证书时 80 也会被预检 |
 | DNS_NOT_READY | getent/dig 和公网 DNS | 修正 A/AAAA，等待 TTL 生效 |
 | CERTIFICATE_UNAVAILABLE | 宝塔证书路径、Eagleway ACME vhost、80 端口公网可达性 | 修复证书或 HTTP-01 条件后重试安装 |
 | OPERATION_CONFLICT | status.activeOperation | 等待当前操作结束，不并发修改主机 |
 | RUNTIME_UNAVAILABLE | systemctl、journalctl、Xray 配置 | 修复 Xray 后通过 API start |
 | OPERATION_FAILED | Agent、Xray、Nginx、Certbot 日志 | 检查下载、校验、证书和 helper |
 | traffic.report_failed | 中心 URL、DNS、TLS、中心状态 | 恢复后 Agent 自动退避重试 |
-| Xray active 但 status=not_installed | 运行时目录和所有权标记权限 | 使用下方旧版本修复并更新 Agent |
-
-旧 release 的运行时目录权限修复：
-
-~~~bash
-sudo chmod 0711 /etc/eagleway-node-agent/runtimes
-sudo chmod 0711 /etc/eagleway-node-agent/runtimes/xray
-sudo -u eagleway-agent test -e /etc/eagleway-node-agent/runtimes/xray/.managed-by-eagleway-node-agent && echo 'ownership marker: visible'
-~~~
-
-该操作只增加目录穿越权限；agent.env 的父目录仍限制其他用户，Xray config 和 marker 文件仍保持 0600。修复后无需重启即可重新查询 status。
+| Xray active 但 status=not_installed | 当前 release、受管标记、运行配置及目录权限 | 核对实际部署与当前 helper 生成的权限，保留日志后按当前部署流程修复 |
 
 基础故障采集：
 
