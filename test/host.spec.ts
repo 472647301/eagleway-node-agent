@@ -3,9 +3,15 @@ import { createServer } from 'node:net'
 import test from 'node:test'
 import {
   parseOsRelease,
+  pidFileProcessActive,
   portAvailable,
   tcpTableHasListeningPort
 } from '@/host/host-inspector.service'
+import {
+  hostProfileFor,
+  hostProfileOsId,
+  isBaotaHostProfile
+} from '@/host/host-profile'
 import {
   EAGLEWAY_CERTBOT_HOOK_MARKER,
   certbotXrayDeployHook
@@ -29,6 +35,67 @@ test('Ubuntu os-release parser handles quoted values', () => {
   assert.deepEqual(
     parseOsRelease('ID=ubuntu\nVERSION_ID="24.04"\nNAME="Ubuntu"\n'),
     { ID: 'ubuntu', VERSION_ID: '24.04', NAME: 'Ubuntu' }
+  )
+})
+
+test('host profiles recognize Ubuntu and Alibaba Cloud Linux 3', () => {
+  assert.equal(
+    hostProfileFor({ ID: 'ubuntu', VERSION_ID: '24.04' }, false),
+    'ubuntu'
+  )
+  assert.equal(
+    hostProfileFor({ ID: 'ubuntu', VERSION_ID: '22.04' }, true),
+    'ubuntu-baota'
+  )
+  assert.equal(
+    hostProfileFor({ ID: 'alinux', VERSION_ID: '3' }, false),
+    'alinux'
+  )
+  assert.equal(
+    hostProfileFor({ ID: 'alinux', VERSION_ID: '3' }, true),
+    'alinux-baota'
+  )
+  assert.equal(hostProfileFor({ ID: 'alinux', VERSION_ID: '2' }, false), null)
+  assert.equal(hostProfileOsId('alinux-baota'), 'alinux')
+  assert.equal(isBaotaHostProfile('ubuntu-baota'), true)
+  assert.equal(isBaotaHostProfile('alinux'), false)
+})
+
+test('Alibaba Cloud Linux 3.2104 os-release selects the alinux profile', () => {
+  const release = parseOsRelease(`NAME="Alibaba Cloud Linux"
+VERSION="3 (OpenAnolis Edition)"
+ID="alinux"
+ID_LIKE="rhel fedora centos anolis"
+VERSION_ID="3"
+VARIANT_ID="openanolis"
+ALINUX_MINOR_ID="2104"
+ALINUX_UPDATE_ID="12"
+PLATFORM_ID="platform:al8"
+`)
+
+  assert.equal(hostProfileFor(release, false), 'alinux')
+  assert.equal(release.ALINUX_UPDATE_ID, '12')
+})
+
+test('BaoTa PID probe treats root-owned active processes as running', () => {
+  const permissionError = Object.assign(new Error('not permitted'), {
+    code: 'EPERM'
+  })
+  assert.equal(
+    pidFileProcessActive('123\n', () => {
+      throw permissionError
+    }),
+    true
+  )
+  assert.equal(
+    pidFileProcessActive('', () => true),
+    false
+  )
+  assert.equal(
+    pidFileProcessActive('123', () => {
+      throw Object.assign(new Error('missing'), { code: 'ESRCH' })
+    }),
+    false
   )
 })
 

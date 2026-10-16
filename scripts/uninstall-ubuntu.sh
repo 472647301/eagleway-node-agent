@@ -12,6 +12,7 @@ readonly SUDOERS_PATH="/etc/sudoers.d/eagleway-node-agent"
 readonly PM2_UNIT="pm2-eagleway-agent.service"
 readonly PM2_UNIT_PATH="/etc/systemd/system/${PM2_UNIT}"
 readonly XRAY_MARKER="${CONFIG_ROOT}/runtimes/xray/.managed-by-eagleway-node-agent"
+readonly AGENT_FIREWALL_ZONE_FILE="${CONFIG_ROOT}/agent-firewall-zone"
 
 ASSUME_YES=false
 KEEP_DATA=false
@@ -141,6 +142,40 @@ if command -v ufw >/dev/null 2>&1 \
   done
 fi
 
+if [[ "${AGENT_PORT}" =~ ^[0-9]+$ && -n "${ALLOWED_CIDRS}" ]]; then
+  FIREWALL_ZONE=""
+  if [[ -f "${AGENT_FIREWALL_ZONE_FILE}" ]]; then
+    FIREWALL_ZONE="$(tr -d '[:space:]' < "${AGENT_FIREWALL_ZONE_FILE}")"
+  elif command -v firewall-cmd >/dev/null 2>&1 \
+    && systemctl is-active --quiet firewalld; then
+    FIREWALL_ZONE="$(firewall-cmd --get-default-zone 2>/dev/null || true)"
+  fi
+  if [[ "${FIREWALL_ZONE}" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    IFS=',' read -ra CIDRS <<< "${ALLOWED_CIDRS}"
+    for cidr in "${CIDRS[@]}"; do
+      cidr="$(printf '%s' "${cidr}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+      [[ -n "${cidr}" ]] || continue
+      if [[ "${cidr}" == *:* ]]; then
+        FIREWALL_FAMILY="ipv6"
+      else
+        FIREWALL_FAMILY="ipv4"
+      fi
+      FIREWALL_RULE="rule family=\"${FIREWALL_FAMILY}\" source address=\"${cidr}\" port port=\"${AGENT_PORT}\" protocol=\"tcp\" accept"
+      if command -v firewall-cmd >/dev/null 2>&1 \
+        && systemctl is-active --quiet firewalld; then
+        firewall-cmd --zone="${FIREWALL_ZONE}" --remove-rich-rule="${FIREWALL_RULE}" \
+          >/dev/null 2>&1 || true
+        firewall-cmd --permanent --zone="${FIREWALL_ZONE}" --remove-rich-rule="${FIREWALL_RULE}" \
+          >/dev/null 2>&1 || true
+      elif command -v firewall-offline-cmd >/dev/null 2>&1; then
+        firewall-offline-cmd --zone="${FIREWALL_ZONE}" --remove-rich-rule="${FIREWALL_RULE}" \
+          >/dev/null 2>&1 || true
+      fi
+    done
+  fi
+fi
+rm -f -- "${AGENT_FIREWALL_ZONE_FILE}"
+
 rm -f -- "${SUDOERS_PATH}" "${HELPER_PATH}" "${PM2_UNIT_PATH}"
 systemctl daemon-reload
 systemctl reset-failed "${PM2_UNIT}" >/dev/null 2>&1 || true
@@ -166,4 +201,4 @@ echo "Eagleway Node Agent has been uninstalled."
 if [[ "${KEEP_DATA}" == "true" ]]; then
   echo "Preserved: ${CONFIG_ROOT}, ${STATE_ROOT}, ${LOG_ROOT}, and ${AGENT_USER}."
 fi
-echo "Review cloud security-group rules and run 'ufw status numbered' for any historical rules."
+echo "Review cloud security-group, UFW, and firewalld rules for any historical entries."

@@ -1,6 +1,6 @@
 # 当前 Agent 上线验收
 
-更新日期：2026-10-14。当前源码包版本见 `package.json`（0.1.7）；以实际发布的 commit、tag 和 release-manifest 为验收对象。本轮文档整理没有执行 VPS 灰度，也没有发布 release。
+更新日期：2026-10-17。当前源码包版本见 `package.json`（0.1.8）；以实际发布的 commit、tag 和 release-manifest 为验收对象。本轮代码修改没有执行 VPS 灰度，也没有发布 release。
 
 ## 本地与 CI 入口
 
@@ -13,7 +13,8 @@ pnpm verify
 ## 当前发布待实测
 
 - [ ] 保存 Agent 与中心提交、tag、manifest、架构、artifact SHA-256、部署路径和环境。
-- [ ] 在普通 Ubuntu 与 Ubuntu 宝塔 Nginx 的当前目标版本/架构验证首次 Bootstrap、独立 env、权限、helper 和 PM2 自启动。
+- [ ] 在普通 Ubuntu、Ubuntu 宝塔 Nginx、Alibaba Cloud Linux 3 x64 与其宝塔 Nginx 环境验证首次 Bootstrap、独立 env、权限、helper 和 PM2 自启动。
+- [ ] 在 Alibaba Cloud Linux 3 的 `5.10.134-17.2.al8` 与 `5.10.134-19.1.al8` 节点验证 DNF、Node.js 22、EPEL Certbot、标准/宝塔 Nginx、`better-sqlite3` 和 firewalld inactive/active 两种路径。
 - [ ] 核验 ALLOWED_CIDRS、可信 loopback 代理、云安全组及主机防火墙；非允许来源被拒绝。
 - [ ] 三协议分别验证安装、证书获取/复用、start/stop、状态、日志、卸载/重复卸载及重装。
 - [ ] 验证配置应用、修订幂等/冲突、失败恢复及中心生效配置收敛。

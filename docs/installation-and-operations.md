@@ -1,12 +1,12 @@
 # 当前安装与运维边界
 
-核对日期：2026-10-14。可执行步骤见[操作手册](operations-runbook.md)，本页说明当前脚本能做什么和需要人工完成什么。
+核对日期：2026-10-17。可执行步骤见[操作手册](operations-runbook.md)，本页说明当前脚本能做什么和需要人工完成什么。
 
 ## 发布与 Bootstrap
 
 当前 `.github/workflows/release.yml` 在 v* tag 或手动触发时验证并构建 Linux x64/arm64 release，包含生产依赖、dist、manifest、Bootstrap 与 helper，并生成 SHA-256 文件。
 
-`scripts/deploy-ubuntu-release.sh` 下载和校验对应架构 artifact，维护独立 env 文件，随后调用 `scripts/bootstrap-ubuntu.sh`。Bootstrap 校验产物和配置，准备 Node.js 22、PM2 6、低权限运行用户、配置/状态/日志目录、root 所有的不可变 release、helper 和 sudo 规则，再切换 current 并重建 PM2 单实例。
+`scripts/deploy-ubuntu-release.sh` 下载和校验对应架构 artifact，维护独立 env 文件，随后调用 `scripts/bootstrap-ubuntu.sh`。两个文件名为兼容旧发布保留，实际支持 Ubuntu 与 Alibaba Cloud Linux 3。Bootstrap 校验系统、产物和配置，通过 apt 或 dnf 准备 Node.js 22、PM2 6、低权限运行用户、配置/状态/日志目录、root 所有的不可变 release、helper 和 sudo 规则，再切换 current 并重建 PM2 单实例。
 
 主要路径为 `/opt/eagleway-node-agent/releases`、`/opt/eagleway-node-agent/current`、`/etc/eagleway-node-agent`、`/var/lib/eagleway-node-agent`、`/var/log/eagleway-node-agent`。数据库与 state.key 需要一起备份；发布目录不可由 Agent 用户改写。
 
@@ -16,7 +16,7 @@
 
 Agent install/config/apply 操作调用固定 helper；Xray 官方 artifact 版本和 SHA-256 固定在 `src/helper.ts`，当前为 v26.3.27，不能通过控制请求或环境变量更改。升级 Xray 需要发布新的 Agent 并按当前运行状态重新安装/应用配置及验证。
 
-Ubuntu 和 Ubuntu 宝塔 Nginx 支持复用现有证书；宝塔缺少证书时使用现有目标站点 WebRoot，或创建带所有权标记的 ACME vhost 后签发。Certbot 续期 hook 仅在证书被当前配置引用时重启运行时；宝塔自行续期后按手册核验并重启。
+Ubuntu、Alibaba Cloud Linux 3 及其宝塔 Nginx 环境支持复用现有证书；宝塔缺少证书时使用现有目标站点 WebRoot，或创建带所有权标记的 ACME vhost 后签发。Alibaba Cloud Linux 3 使用 EPEL Certbot；空白系统的标准 Nginx 来自带 GPG 校验的 nginx.org CentOS 8 仓库。Certbot 续期 hook 仅在证书被当前配置引用时重启运行时；宝塔自行续期后按手册核验并重启。
 
 不覆盖共享网站主配置，不通过停止网站抢占端口。预检范围以[节点契约](node-api-contract.md)为准，完整证书和安装能力由异步执行阶段确认。
 
@@ -28,6 +28,6 @@ Agent 重启将未完成操作标记为失败并在状态查询时核对实际�
 
 ## 网络访问
 
-云安全组、主机防火墙和 ALLOWED_CIDRS 同时核对中心出口来源。Bootstrap 为已启用 UFW 添加当前控制端口允许规则，不自动删除过往 CIDR 规则。TRUST_PROXY=true 时应用仅信任 loopback 代理。
+云安全组、主机防火墙和 ALLOWED_CIDRS 同时核对中心出口来源。Bootstrap 为已启用 UFW 或 firewalld 添加当前控制端口来源规则，不自动删除配置变更后遗留的历史规则。TRUST_PROXY=true 时应用仅信任 loopback 代理。
 
 以上行为依据当前 scripts、host、helper、state 与 operations 源码；当前 release 的真实服务器结果见[上线验收](release-acceptance.md)。

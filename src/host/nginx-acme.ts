@@ -1,6 +1,7 @@
 export const EAGLEWAY_NGINX_MARKER = '# Managed by eagleway-node-agent\n'
 export const BAOTA_NGINX_BINARY = '/www/server/nginx/sbin/nginx'
 export const BAOTA_NGINX_VHOST_DIRECTORY = '/www/server/panel/vhost/nginx'
+export const BAOTA_NGINX_PID_PATH = '/www/server/nginx/logs/nginx.pid'
 
 export interface NginxDomainInspection {
   matchesDomain: boolean

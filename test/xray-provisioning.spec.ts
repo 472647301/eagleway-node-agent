@@ -92,6 +92,62 @@ test('preflight reuses an active standard Nginx listener for ACME', async () => 
   assert.deepEqual(checkedPorts, [9443])
 })
 
+test('preflight checks port 80 for Alibaba Cloud Linux without active Nginx', async () => {
+  const checkedPorts: number[] = []
+  const inspector = {
+    inspect: () => ({
+      profile: 'alinux',
+      osId: 'alinux',
+      osVersion: '3',
+      architecture: 'x64',
+      baota: false
+    }),
+    assertDomainReady: async () => undefined,
+    assertPortAvailable: async (port: number) => {
+      checkedPorts.push(port)
+    },
+    certificateAvailable: () => false,
+    standardNginxActive: async () => false
+  }
+  const service = new XrayProvisioningService(
+    fixtureConfig('/tmp/eagleway-provisioning-unused'),
+    inspector as never,
+    {} as never,
+    {} as never
+  )
+
+  await service.preflight(input)
+  assert.deepEqual(checkedPorts, [9443, 80])
+})
+
+test('preflight checks port 80 when BaoTa Nginx is stopped', async () => {
+  const checkedPorts: number[] = []
+  const inspector = {
+    inspect: () => ({
+      profile: 'alinux-baota',
+      osId: 'alinux',
+      osVersion: '3',
+      architecture: 'x64',
+      baota: true
+    }),
+    assertDomainReady: async () => undefined,
+    assertPortAvailable: async (port: number) => {
+      checkedPorts.push(port)
+    },
+    certificateAvailable: () => false,
+    baotaNginxActive: () => false
+  }
+  const service = new XrayProvisioningService(
+    fixtureConfig('/tmp/eagleway-provisioning-unused'),
+    inspector as never,
+    {} as never,
+    {} as never
+  )
+
+  await service.preflight(input)
+  assert.deepEqual(checkedPorts, [9443, 80])
+})
+
 function fixtureConfig(stateDir: string): AppConfig {
   return {
     nodeId: 7,

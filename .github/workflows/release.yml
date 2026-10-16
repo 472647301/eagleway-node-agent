@@ -33,6 +33,7 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+      - run: bash -n scripts/*.sh
       - run: pnpm verify
 
       - name: Build production release
@@ -52,6 +53,15 @@ jobs:
           rm -rf "${package_root}" "${output_dir}"
           mkdir -p "${package_root}" "${output_dir}"
           pnpm --filter @eagleway/node-agent --prod deploy --legacy "${release_dir}"
+
+          if [[ "${RELEASE_ARCH}" == "x64" ]]; then
+            docker run --rm \
+              --platform linux/amd64 \
+              --volume "${release_dir}:/app" \
+              --workdir /app \
+              node:22-bullseye \
+              bash -lc 'npm rebuild better-sqlite3 --build-from-source && node -e "const Database = require(\"better-sqlite3\"); new Database(\":memory:\").close()"'
+          fi
 
           RELEASE_DIR="${release_dir}" node <<'NODE'
           const { writeFileSync } = require('node:fs')

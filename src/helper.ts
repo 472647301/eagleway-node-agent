@@ -46,6 +46,12 @@ import {
   ufwIsActive,
   ufwOwnedRuleNumbers
 } from './host/firewall-rules'
+import {
+  HOST_PROFILES,
+  hostProfileOsId,
+  isBaotaHostProfile,
+  type HostProfile
+} from './host/host-profile'
 
 const stateDir = resolve(
   process.env.STATE_DIR || '/var/lib/eagleway-node-agent'
@@ -58,6 +64,8 @@ const runtimeConfigPath = join(runtimeDir, 'config.json')
 const runtimeMarker = join(runtimeDir, '.managed-by-eagleway-node-agent')
 const runtimeMarkerValue = 'eagleway-node-agent:xray:v1\n'
 const firewallManifestPath = join(runtimeDir, 'firewall-rules.json')
+const nginxRepositoryPath = '/etc/yum.repos.d/eagleway-nginx.repo'
+const nginxRepositoryMarker = '# Managed by eagleway-node-agent\n'
 const runtimeLogDir = '/var/log/eagleway-node-agent'
 const runtimeLogPaths = [
   join(runtimeLogDir, 'xray-access.log'),
@@ -83,7 +91,7 @@ type InstallPlan = {
   nodeId: number
   protocol: 'trojan' | 'vless' | 'vmess'
   revision: number
-  hostProfile: 'ubuntu' | 'ubuntu-baota'
+  hostProfile: HostProfile
   architecture: keyof typeof xrayRelease.assets
   port: number
   domain: string
@@ -148,7 +156,7 @@ async function main(): Promise<void> {
 }
 
 async function install(plan: InstallPlan): Promise<void> {
-  assertUbuntu()
+  assertSupportedHost(plan.hostProfile)
   assertManagedResourceBoundary()
   const artifact = xrayArtifact(plan.architecture)
   mkdirSync(runtimesDir, { recursive: true, mode: 0o711 })
@@ -219,7 +227,7 @@ async function install(plan: InstallPlan): Promise<void> {
 }
 
 async function applyConfig(plan: InstallPlan): Promise<void> {
-  assertUbuntu()
+  assertSupportedHost(plan.hostProfile)
   if (!isManagedRuntime() || !existsSync(runtimeConfigPath)) {
     fail('Managed Xray runtime is not installed')
   }
@@ -355,40 +363,13 @@ function ensureCertificate(plan: InstallPlan): { cert: string; key: string } {
     return existing
   }
 
-  if (plan.hostProfile === 'ubuntu') {
-    run(
-      '/usr/bin/apt-get',
-      ['update'],
-      true,
-      'System package index update failed'
-    )
-    run(
-      '/usr/bin/apt-get',
-      ['install', '-y', '--no-install-recommends', 'nginx', 'certbot'],
-      true,
-      'Required package installation failed'
-    )
-  } else if (!existsSync('/usr/bin/certbot')) {
-    run(
-      '/usr/bin/apt-get',
-      ['update'],
-      true,
-      'System package index update failed'
-    )
-    run(
-      '/usr/bin/apt-get',
-      ['install', '-y', '--no-install-recommends', 'certbot'],
-      true,
-      'Required package installation failed'
-    )
-  }
-  const webroot =
-    plan.hostProfile === 'ubuntu-baota'
-      ? ensureBaotaAcmeWebroot(plan.domain)
-      : '/var/www/eagleway-acme'
+  ensureCertificatePackages(plan.hostProfile)
+  const webroot = isBaotaHostProfile(plan.hostProfile)
+    ? ensureBaotaAcmeWebroot(plan.domain)
+    : '/var/www/eagleway-acme'
   mkdirSync(webroot, { recursive: true, mode: 0o755 })
   const nginxPath = `/etc/nginx/conf.d/eagleway-acme-${plan.domain}.conf`
-  if (plan.hostProfile === 'ubuntu') {
+  if (!isBaotaHostProfile(plan.hostProfile)) {
     if (
       existsSync(nginxPath) &&
       !readFileSync(nginxPath, 'utf8').startsWith(EAGLEWAY_NGINX_MARKER)
@@ -429,6 +410,59 @@ function ensureCertificate(plan: InstallPlan): { cert: string; key: string } {
   validateCertificate(issued, plan.domain)
   ensureCertbotDeployHook()
   return issued
+}
+
+function ensureCertificatePackages(hostProfile: HostProfile): void {
+  const packages = [
+    ...(!isBaotaHostProfile(hostProfile) && !existsSync('/usr/sbin/nginx')
+      ? ['nginx']
+      : []),
+    ...(!existsSync('/usr/bin/certbot') ? ['certbot'] : [])
+  ]
+  if (!packages.length) return
+
+  if (hostProfileOsId(hostProfile) === 'ubuntu') {
+    run(
+      '/usr/bin/apt-get',
+      ['update'],
+      true,
+      'System package index update failed'
+    )
+    run(
+      '/usr/bin/apt-get',
+      ['install', '-y', '--no-install-recommends', ...packages],
+      true,
+      'Required package installation failed'
+    )
+    return
+  }
+
+  if (packages.includes('nginx')) ensureAlinuxNginxRepository()
+  run(
+    '/usr/bin/dnf',
+    ['install', '-y', ...packages],
+    true,
+    'Required package installation failed'
+  )
+}
+
+function ensureAlinuxNginxRepository(): void {
+  const repository = `${nginxRepositoryMarker}[nginx-stable]
+name=nginx stable repo
+baseurl=https://nginx.org/packages/centos/8/$basearch/
+enabled=1
+gpgcheck=1
+gpgkey=https://nginx.org/keys/nginx_signing.key
+module_hotfixes=true
+`
+  if (existsSync(nginxRepositoryPath)) {
+    const existing = readFileSync(nginxRepositoryPath, 'utf8')
+    if (!existing.startsWith(nginxRepositoryMarker)) {
+      fail('Existing Nginx repository configuration is not owned by Eagleway')
+    }
+    if (existing === repository) return
+  }
+  atomicWrite(nginxRepositoryPath, repository, 0o644)
 }
 
 function ensureCertbotDeployHook(): void {
@@ -613,7 +647,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadOnlyPaths=/etc/letsencrypt /www/server/panel/vhost/cert
+ReadOnlyPaths=-/etc/letsencrypt -/www/server/panel/vhost/cert
 ReadWritePaths=/var/log/eagleway-node-agent
 LimitNOFILE=1048576
 
@@ -788,27 +822,50 @@ function removeFirewallRule(rule: FirewallRule): void {
   }
 
   const executable = firewalldExecutable()
-  if (!executable) {
-    fail('firewalld is unavailable while removing managed rules')
+  const active = firewalldIsActive()
+  if (active && !executable) {
+    fail('firewall-cmd is unavailable while removing managed runtime rules')
   }
   if (
     rule.runtimeAdded &&
-    firewalldPortOpen(executable, rule.zone, rule.port, false)
+    active &&
+    firewalldPortOpen(executable!, rule.zone, rule.port, false)
   ) {
     run(
-      executable,
+      executable!,
       [`--zone=${rule.zone}`, `--remove-port=${rule.port}/tcp`],
       true,
       `Failed to remove managed firewalld rule for TCP port ${rule.port}`
     )
   }
-  if (
-    rule.permanentAdded &&
-    firewalldPortOpen(executable, rule.zone, rule.port, true)
-  ) {
+  if (!rule.permanentAdded) return
+
+  if (active) {
+    if (firewalldPortOpen(executable!, rule.zone, rule.port, true)) {
+      run(
+        executable!,
+        [
+          '--permanent',
+          `--zone=${rule.zone}`,
+          `--remove-port=${rule.port}/tcp`
+        ],
+        true,
+        `Failed to remove managed permanent firewalld rule for TCP port ${rule.port}`
+      )
+    }
+    return
+  }
+
+  const offlineExecutable = firewalldOfflineExecutable()
+  if (!offlineExecutable) {
+    fail(
+      'firewall-offline-cmd is unavailable while removing managed permanent rules'
+    )
+  }
+  if (firewalldOfflinePortOpen(offlineExecutable, rule.zone, rule.port)) {
     run(
-      executable,
-      ['--permanent', `--zone=${rule.zone}`, `--remove-port=${rule.port}/tcp`],
+      offlineExecutable,
+      [`--zone=${rule.zone}`, `--remove-port=${rule.port}/tcp`],
       true,
       `Failed to remove managed permanent firewalld rule for TCP port ${rule.port}`
     )
@@ -822,11 +879,7 @@ function activeFirewallManager():
   const ufw = ufwExecutable()
   const ufwActive = Boolean(ufw && ufwIsActive(ufwStatus(ufw)))
   const firewalld = firewalldExecutable()
-  const firewalldActive = Boolean(
-    firewalld &&
-    run('/usr/bin/systemctl', ['is-active', '--quiet', 'firewalld'], false)
-      .status === 0
-  )
+  const firewalldActive = Boolean(firewalld && firewalldIsActive())
   if (ufwActive && firewalldActive) {
     fail('Multiple supported host firewalls are active')
   }
@@ -867,12 +920,39 @@ function firewalldPortOpen(
   return runCapture(executable, args, false).status === 0
 }
 
+function firewalldOfflinePortOpen(
+  executable: string,
+  zone: string,
+  port: number
+): boolean {
+  return (
+    runCapture(
+      executable,
+      [`--zone=${zone}`, `--query-port=${port}/tcp`],
+      false
+    ).status === 0
+  )
+}
+
+function firewalldIsActive(): boolean {
+  return (
+    run('/usr/bin/systemctl', ['is-active', '--quiet', 'firewalld'], false)
+      .status === 0
+  )
+}
+
 function ufwExecutable(): string | null {
   return ['/usr/sbin/ufw', '/usr/bin/ufw'].find(existsSync) ?? null
 }
 
 function firewalldExecutable(): string | null {
   return existsSync('/usr/bin/firewall-cmd') ? '/usr/bin/firewall-cmd' : null
+}
+
+function firewalldOfflineExecutable(): string | null {
+  return existsSync('/usr/bin/firewall-offline-cmd')
+    ? '/usr/bin/firewall-offline-cmd'
+    : null
 }
 
 function normalizedFirewallPorts(ports: number[]): number[] {
@@ -1007,7 +1087,7 @@ function readPlan(
     fail('Protocol is invalid')
   if (!Number.isSafeInteger(value.revision) || Number(value.revision) < 1)
     fail('Configuration revision is invalid')
-  if (!['ubuntu', 'ubuntu-baota'].includes(String(value.hostProfile)))
+  if (!HOST_PROFILES.includes(value.hostProfile as HostProfile))
     fail('Host profile is invalid')
   if (!['x64', 'arm64'].includes(String(value.architecture)))
     fail('Architecture is unsupported')
@@ -1130,11 +1210,32 @@ function commandFailureMessage(
   return detail ? `${failureMessage}: ${detail}` : failureMessage
 }
 
-function assertUbuntu(): void {
+function assertSupportedHost(hostProfile: HostProfile): void {
   const release = readFileSync('/etc/os-release', 'utf8')
-  if (!/^ID=ubuntu$/m.test(release) && !/^ID="ubuntu"$/m.test(release)) {
-    fail('Only Ubuntu is supported')
+  const expectedOsId = hostProfileOsId(hostProfile)
+  const actualOsId = osReleaseValue(release, 'ID')
+  const versionId = osReleaseValue(release, 'VERSION_ID')
+  if (
+    actualOsId !== expectedOsId ||
+    (actualOsId === 'alinux' && versionId !== '3')
+  ) {
+    fail('Install plan host profile does not match the operating system')
   }
+  if (actualOsId === 'alinux' && process.arch !== 'x64') {
+    fail('Alibaba Cloud Linux 3 is supported only on x64 hosts')
+  }
+  const baota = existsSync('/www/server/panel')
+  if (baota !== isBaotaHostProfile(hostProfile)) {
+    fail('Install plan host profile does not match the BaoTa installation')
+  }
+}
+
+function osReleaseValue(release: string, key: string): string | null {
+  const match = new RegExp(
+    `^${key}=(?:"([^"]*)"|'([^']*)'|([^\\r\\n]*))$`,
+    'm'
+  ).exec(release)
+  return (match?.[1] ?? match?.[2] ?? match?.[3] ?? '').trim() || null
 }
 
 function validDomain(value: string): boolean {

@@ -2,7 +2,7 @@
 
 状态：当前源码说明
 
-核对日期：2026-10-14
+核对日期：2026-10-17
 
 本文档描述当前 Agent Controller、DTO 和 Service 的实际协议，并与当前中心 NodeClient 对照。代码入口见 `src/protocols/xray`、`src/logs`、`src/reporting` 和 `src/common/api`；设备及部署结果见[上线验收](release-acceptance.md)。
 
@@ -343,10 +343,10 @@ Body 与流量查询 data 一致，但不包含 nodeId。中心反向代理覆�
 
 `XrayProvisioningService.preflight` 当前检查：
 
-- Linux Ubuntu、x64/arm64，宝塔存在时必须为 Nginx 组合。
+- Linux Ubuntu x64/arm64 或 Alibaba Cloud Linux 3 x64，宝塔存在时必须为 Nginx 组合。
 - 协议端口不是 80 或本机 Xray API 端口；修改端口时确认新端口可用。
 - domain 至少可解析 A 或 AAAA。
-- 普通 Ubuntu 缺少可复用证书且标准 Nginx 未活动时检查 80 端口可用。
+- 普通系统缺少可复用证书且标准 Nginx 未活动时检查 80 端口可用；宝塔 Nginx 停止时同样检查 80 端口。
 
 预检发生在持久化异步任务创建前，不写运行配置。证书匹配、签发、Nginx 配置、runtime artifact 下载和 helper 操作属于后续异步阶段，失败会记录任务错误。当前没有完整磁盘/内存容量预检，不能声称所有安装条件都已在无副作用阶段验证。
 
@@ -356,4 +356,4 @@ Body 与流量查询 data 一致，但不包含 nodeId。中心反向代理覆�
 
 用户数组最多 10000 项；assignmentId 为 UUID，credential 为 1–256 字符。协议 DTO 对 nodeId、revision 和端口做整数转换及范围校验；未知字段被拒绝。日志参数默认 page=1、pageSize=100，安全 basename 和 realpath 均校验。
 
-本文为代码行为说明，真实 Ubuntu/宝塔安装、权限、签名 artifact、证书续期及中心流量入账仍需当前 release 的实测证据。
+本文为代码行为说明，真实 Ubuntu、Alibaba Cloud Linux 3 与宝塔环境的安装、权限、签名 artifact、证书续期及中心流量入账仍需当前 release 的实测证据。

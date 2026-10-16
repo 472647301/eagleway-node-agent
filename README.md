@@ -2,7 +2,7 @@
 
 Eagleway Node Agent 是 Eagleway Network VPN 代理应用部署在自有 VPS 上的节点控制代理。中心接口端位于私有仓库 `eagleway-network-api`；Agent 接收中心控制请求，管理本机协议运行时和用户，并向中心服务上报流量快照。
 
-当前代码已实现节点 API、SQLite 状态、Xray-core 三协议用户适配、流量上报、日志读取、Ubuntu/宝塔预检和受限提权 helper。当前发布包是否可投产，以 Ubuntu 与宝塔 VPS 灰度及中心联调记录为准，见[上线验收](docs/release-acceptance.md)。
+当前代码已实现节点 API、SQLite 状态、Xray-core 三协议用户适配、流量上报、日志读取、Ubuntu/Alibaba Cloud Linux 3/宝塔预检和受限提权 helper。当前发布包是否可投产，以目标 VPS 灰度及中心联调记录为准，见[上线验收](docs/release-acceptance.md)。
 
 ## 项目定位
 
@@ -12,7 +12,7 @@ Eagleway Node Agent 是 Eagleway Network VPN 代理应用部署在自有 VPS 上
 - 中心服务：`eagleway-network-api`
 - 部署方式：PM2 fork 单实例
 - 本地状态：SQLite
-- 当前版本操作系统：Ubuntu、Ubuntu + 宝塔
+- 当前版本操作系统：Ubuntu x64/arm64、Alibaba Cloud Linux 3 x64，以及两者的宝塔 Nginx 环境
 
 Agent 不是中心数据库的副本。中心服务始终是节点配置、用户分配和流量账本的事实源；SQLite 仅用于保存本机执行状态、用户与运行时标识映射、上报游标和资源所有权。
 
@@ -25,12 +25,12 @@ Agent 不是中心数据库的副本。中心服务始终是节点配置、用�
 - 按用户累计上下行流量采集。
 - 节点主动向中心上报流量和 Xray 实际用户数。
 - 安全的本机日志文件列表和分页读取。
-- 空白 Ubuntu VPS 与 Ubuntu 宝塔环境的预检和安装。
+- 空白 Ubuntu/Alibaba Cloud Linux 3 VPS 与对应宝塔 Nginx 环境的预检和安装。
 - 中断识别、幂等控制和结构化错误。
 
 不包含：
 
-- CentOS/RHEL 支持。
+- 通用 CentOS/RHEL、Alibaba Cloud Linux 2/4 支持。
 - Shadowsocks 实现。
 - 443 端口上的 TLS/SNI 多路复用。
 - 流量超额禁用、删除或告警。
@@ -73,15 +73,15 @@ git pull --ff-only
 pnpm verify
 git status --short
 git push origin main
-git tag -a v0.1.7 -m "release: v0.1.7"
-git push origin v0.1.7
+git tag -a v0.1.8 -m "release: v0.1.8"
+git push origin v0.1.8
 ```
 
 `git status --short` 应无输出。tag 推送后可在 [Release workflow](https://github.com/472647301/eagleway-node-agent/actions/workflows/release.yml) 查看构建进度；成功后产物会发布到 [GitHub Releases](https://github.com/472647301/eagleway-node-agent/releases)。已经发布的 tag 不要强制覆盖，修复后创建新的递增版本 tag。
 
-## Ubuntu Bootstrap
+## Linux Bootstrap
 
-推送 `v*` tag 会触发 Release workflow，在 Ubuntu x64 和 arm64 runner 上完成验证、Nest 构建和生产依赖安装，并发布以下带 SHA-256 校验文件的 GitHub Release assets：
+推送 `v*` tag 会触发 Release workflow，在 Linux x64 和 arm64 runner 上完成验证、Nest 构建和生产依赖安装，并发布以下带 SHA-256 校验文件的 GitHub Release assets。x64 包中的原生模块在 glibc 2.31 环境重建和加载验证，可用于 glibc 2.32 的 Alibaba Cloud Linux 3：
 
 - `eagleway-node-agent-linux-x64.tar.gz`
 - `eagleway-node-agent-linux-arm64.tar.gz`
@@ -91,22 +91,24 @@ git push origin v0.1.7
 Release workflow 完成后，在 VPS 上只需下载同一个 tag 中的部署脚本并运行：
 
 ```bash
-TAG=v0.1.7
+TAG=v0.1.8
 curl -fsSL "https://raw.githubusercontent.com/472647301/eagleway-node-agent/${TAG}/scripts/deploy-ubuntu-release.sh" -o /tmp/eagleway-deploy.sh
 bash /tmp/eagleway-deploy.sh "${TAG}"
 ```
 
-脚本会自动识别 x64/arm64、下载 release 和校验文件、验证 SHA-256、解压并调用 Bootstrap。首次运行会创建 `~/.config/eagleway-node-agent/agent.env` 并打开编辑器；至少填写 `NODE_ID`、`ALLOWED_CIDRS` 和 `REPORTING_ENABLED`。服务器带宽由中心 API 自行维护，不需要写入 Agent 配置。后续升级只需：
+脚本会自动识别 x64/arm64、下载 release 和校验文件、验证 SHA-256、解压并调用 Bootstrap。文件名为兼容旧版本仍保留 `ubuntu`，但脚本会读取 `/etc/os-release` 并支持 Ubuntu 与 Alibaba Cloud Linux 3。首次运行会创建 `~/.config/eagleway-node-agent/agent.env` 并打开编辑器；至少填写 `NODE_ID`、`ALLOWED_CIDRS` 和 `REPORTING_ENABLED`。服务器带宽由中心 API 自行维护，不需要写入 Agent 配置。后续升级只需：
 
 ```bash
-bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.1.7
+bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.1.8
 ```
 
 部署后常用检查：
 
-Ubuntu 防火墙
+主机防火墙
+
 ```bash
-sudo ufw status verbose
+sudo ufw status verbose                   # Ubuntu
+sudo firewall-cmd --state                 # Alibaba Cloud Linux 3
 ```
 
 安装或修改 Xray 配置时，受限 helper 会在已启用的 UFW 或 firewalld 中自动放行 TCP 80 和当前协议端口；云安全组仍需在云平台配置。
@@ -122,7 +124,7 @@ Bootstrap 会校验 release manifest、平台、CPU 架构和 Node.js 主版本�
 
 首次部署、服务器本机全功能自测、与中心联调、源码升级和人工回滚的可执行步骤见[运维与服务器自测手册](docs/operations-runbook.md)。
 
-## Ubuntu 卸载
+## Linux 卸载
 
 完整卸载 Agent 及其管理的 Xray 运行时：
 
@@ -137,5 +139,5 @@ sudo bash /opt/eagleway-node-agent/current/scripts/uninstall-ubuntu.sh
 ## 当前验收状态
 
 - 当前类型检查、Nest 构建和自动化测试的入口为 `pnpm verify`；测试用例覆盖配置、SQLite、加密、日志边界、IP 处理以及 Xray protobuf 大整数计数。
-- 当前发布包的真实 Ubuntu/宝塔生命周期、中心联调和实际代理流量结果需按[上线验收](docs/release-acceptance.md)记录；历史源码或其他 release 的检查不能替代当前部署证据。
+- 当前发布包在 Ubuntu、Alibaba Cloud Linux 3 与宝塔环境的真实生命周期、中心联调和实际代理流量结果需按[上线验收](docs/release-acceptance.md)记录；历史源码或其他 release 的检查不能替代当前部署证据。
 - 本次文档核对未重新运行服务器灰度或发布 workflow，不更新实测通过结论。

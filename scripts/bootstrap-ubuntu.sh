@@ -7,11 +7,17 @@ readonly INSTALL_ROOT="/opt/eagleway-node-agent"
 readonly CONFIG_ROOT="/etc/eagleway-node-agent"
 readonly STATE_ROOT="/var/lib/eagleway-node-agent"
 readonly LOG_ROOT="/var/log/eagleway-node-agent"
+readonly AGENT_FIREWALL_ZONE_FILE="${CONFIG_ROOT}/agent-firewall-zone"
 readonly APT_LOCK_TIMEOUT_SECONDS=600
 
 run_apt_get() {
   echo "Running apt-get; waiting up to ${APT_LOCK_TIMEOUT_SECONDS}s for package manager locks..."
   apt-get -o "DPkg::Lock::Timeout=${APT_LOCK_TIMEOUT_SECONDS}" "$@"
+}
+
+run_dnf() {
+  echo "Running dnf..."
+  dnf "$@"
 }
 
 usage() {
@@ -84,7 +90,26 @@ CENTER_API_URL="$(env_value CENTER_API_URL || true)"
 
 [[ -f /etc/os-release ]] || { echo "Missing /etc/os-release" >&2; exit 1; }
 . /etc/os-release
-[[ "${ID:-}" == "ubuntu" ]] || { echo "Only Ubuntu is supported" >&2; exit 1; }
+case "${ID:-}" in
+  ubuntu)
+    OS_FAMILY="ubuntu"
+    ;;
+  alinux)
+    [[ "${VERSION_ID:-}" == "3" ]] || {
+      echo "Only Alibaba Cloud Linux 3 is supported" >&2
+      exit 1
+    }
+    [[ "$(uname -m)" == "x86_64" ]] || {
+      echo "Alibaba Cloud Linux 3 is supported only on x86_64" >&2
+      exit 1
+    }
+    OS_FAMILY="alinux"
+    ;;
+  *)
+    echo "Only Ubuntu and Alibaba Cloud Linux 3 are supported" >&2
+    exit 1
+    ;;
+esac
 [[ -f "${RELEASE_MANIFEST}" \
   && -f "${RELEASE_SOURCE_DIR}/package.json" \
   && -f "${RELEASE_SOURCE_DIR}/dist/main.js" \
@@ -118,28 +143,47 @@ assert_fixed_env LOG_DIR "${LOG_ROOT}"
 assert_fixed_env XRAY_BINARY /usr/local/bin/xray
 assert_fixed_env PRIVILEGED_HELPER /usr/local/libexec/eagleway-node-helper
 
-export DEBIAN_FRONTEND=noninteractive
-run_apt_get update
-run_apt_get install -y --no-install-recommends ca-certificates curl gnupg rsync sudo unzip
+if [[ "${OS_FAMILY}" == "ubuntu" ]]; then
+  export DEBIAN_FRONTEND=noninteractive
+  run_apt_get update
+  run_apt_get install -y --no-install-recommends ca-certificates curl gnupg rsync sudo unzip
+else
+  run_dnf install -y ca-certificates curl epel-release rsync shadow-utils sudo unzip util-linux
+fi
 
 NODE_MAJOR=0
 if command -v node >/dev/null 2>&1; then
   NODE_MAJOR="$(node -p "Number(process.versions.node.split('.')[0])")"
 fi
-if (( NODE_MAJOR < 22 )); then
-  install -d -m 0755 /etc/apt/keyrings
-  curl --fail --silent --show-error --location \
-    https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-    --output /tmp/eagleway-nodesource.gpg.key
-  gpg --dearmor --yes --output /etc/apt/keyrings/nodesource.gpg /tmp/eagleway-nodesource.gpg.key
-  rm -f /tmp/eagleway-nodesource.gpg.key
-  echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
-    > /etc/apt/sources.list.d/nodesource.list
-  run_apt_get update
-  run_apt_get install -y --no-install-recommends nodejs
+if (( NODE_MAJOR != 22 )); then
+  if [[ "${OS_FAMILY}" == "ubuntu" ]]; then
+    install -d -m 0755 /etc/apt/keyrings
+    curl --fail --silent --show-error --location \
+      https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+      --output /tmp/eagleway-nodesource.gpg.key
+    gpg --dearmor --yes --output /etc/apt/keyrings/nodesource.gpg /tmp/eagleway-nodesource.gpg.key
+    rm -f /tmp/eagleway-nodesource.gpg.key
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
+      > /etc/apt/sources.list.d/nodesource.list
+    run_apt_get update
+    run_apt_get install -y --allow-downgrades --no-install-recommends nodejs
+  else
+    cat > /etc/yum.repos.d/nodesource-nodejs.repo <<'EOF'
+[nodesource-nodejs]
+name=Node.js Packages for Linux RPM based distros
+baseurl=https://rpm.nodesource.com/pub_22.x/nodistro/nodejs/$basearch
+priority=9
+enabled=1
+gpgcheck=1
+gpgkey=https://rpm.nodesource.com/gpgkey/ns-operations-public.key
+module_hotfixes=1
+EOF
+    run_dnf makecache --disablerepo='*' --enablerepo=nodesource-nodejs
+    run_dnf install -y --allowerasing nodejs
+  fi
 fi
 
-node -e "if (Number(process.versions.node.split('.')[0]) < 22) process.exit(1)"
+node -e "if (Number(process.versions.node.split('.')[0]) !== 22) process.exit(1)"
 [[ -x /usr/bin/node ]] || {
   echo "Node.js 22 must be available at /usr/bin/node" >&2
   exit 1
@@ -240,10 +284,51 @@ ln -sfn "${CONFIG_ROOT}/agent.env" "${INSTALL_ROOT}/current/.env"
   pm2 startup systemd -u "${AGENT_USER}" --hp "${AGENT_HOME}" >/dev/null
 )
 
+UFW_ACTIVE=false
+FIREWALLD_ACTIVE=false
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
+  UFW_ACTIVE=true
+fi
+if command -v firewall-cmd >/dev/null 2>&1 \
+  && systemctl is-active --quiet firewalld; then
+  FIREWALLD_ACTIVE=true
+fi
+if [[ "${UFW_ACTIVE}" == "true" && "${FIREWALLD_ACTIVE}" == "true" ]]; then
+  echo "Multiple supported host firewalls are active" >&2
+  exit 1
+fi
+if [[ "${UFW_ACTIVE}" == "true" ]]; then
   IFS=',' read -ra CIDRS <<< "${ALLOWED_CIDRS}"
   for cidr in "${CIDRS[@]}"; do
+    cidr="$(printf '%s' "${cidr}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    [[ -n "${cidr}" ]] || continue
     ufw allow from "${cidr}" to any port "${AGENT_PORT}" proto tcp
+  done
+elif [[ "${FIREWALLD_ACTIVE}" == "true" ]]; then
+  FIREWALL_ZONE="$(firewall-cmd --get-default-zone)"
+  [[ "${FIREWALL_ZONE}" =~ ^[A-Za-z0-9_-]+$ ]] || {
+    echo "firewalld returned an invalid default zone" >&2
+    exit 1
+  }
+  printf '%s\n' "${FIREWALL_ZONE}" > "${AGENT_FIREWALL_ZONE_FILE}"
+  chown root:root "${AGENT_FIREWALL_ZONE_FILE}"
+  chmod 0600 "${AGENT_FIREWALL_ZONE_FILE}"
+  IFS=',' read -ra CIDRS <<< "${ALLOWED_CIDRS}"
+  for cidr in "${CIDRS[@]}"; do
+    cidr="$(printf '%s' "${cidr}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    [[ -n "${cidr}" ]] || continue
+    if [[ "${cidr}" == *:* ]]; then
+      FIREWALL_FAMILY="ipv6"
+    else
+      FIREWALL_FAMILY="ipv4"
+    fi
+    FIREWALL_RULE="rule family=\"${FIREWALL_FAMILY}\" source address=\"${cidr}\" port port=\"${AGENT_PORT}\" protocol=\"tcp\" accept"
+    if ! firewall-cmd --zone="${FIREWALL_ZONE}" --query-rich-rule="${FIREWALL_RULE}" >/dev/null; then
+      firewall-cmd --zone="${FIREWALL_ZONE}" --add-rich-rule="${FIREWALL_RULE}"
+    fi
+    if ! firewall-cmd --permanent --zone="${FIREWALL_ZONE}" --query-rich-rule="${FIREWALL_RULE}" >/dev/null; then
+      firewall-cmd --permanent --zone="${FIREWALL_ZONE}" --add-rich-rule="${FIREWALL_RULE}"
+    fi
   done
 fi
 

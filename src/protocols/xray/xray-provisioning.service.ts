@@ -15,6 +15,7 @@ import {
   type HostInspection,
   type HostProfile
 } from '@/host/host-inspector.service'
+import { isBaotaHostProfile } from '@/host/host-profile'
 import {
   CERTBOT_XRAY_DEPLOY_HOOK,
   EAGLEWAY_CERTBOT_HOOK_MARKER
@@ -67,12 +68,11 @@ export class XrayProvisioningService {
     const certificateAvailable = this.inspector.certificateAvailable(
       input.domain
     )
-    if (
-      host.profile === 'ubuntu' &&
-      !certificateAvailable &&
-      !(await this.inspector.standardNginxActive())
-    ) {
-      await this.inspector.assertPortAvailable(80)
+    if (!certificateAvailable) {
+      const nginxActive = isBaotaHostProfile(host.profile)
+        ? this.inspector.baotaNginxActive()
+        : await this.inspector.standardNginxActive()
+      if (!nginxActive) await this.inspector.assertPortAvailable(80)
     }
     return host
   }
@@ -221,7 +221,7 @@ export class XrayProvisioningService {
     domain: string
   ): string | null {
     if (this.inspector.certificateAvailable(domain)) return null
-    return hostProfile === 'ubuntu-baota'
+    return isBaotaHostProfile(hostProfile)
       ? baotaAcmeConfigPath(domain)
       : `/etc/nginx/conf.d/eagleway-acme-${domain}.conf`
   }

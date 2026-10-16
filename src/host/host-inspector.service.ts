@@ -3,10 +3,15 @@ import { promises as dns } from 'node:dns'
 import { existsSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { AgentError } from '@/common/api/agent-error'
-import { BAOTA_NGINX_BINARY } from './nginx-acme'
+import { BAOTA_NGINX_BINARY, BAOTA_NGINX_PID_PATH } from './nginx-acme'
 import { ProcessRunnerService } from './process-runner.service'
+import {
+  hostProfileFor,
+  hostProfileOsId,
+  type HostProfile
+} from './host-profile'
 
-export type HostProfile = 'ubuntu' | 'ubuntu-baota'
+export type { HostProfile } from './host-profile'
 
 export interface HostInspection {
   profile: HostProfile
@@ -26,15 +31,17 @@ export class HostInspectorService {
     if (process.platform !== 'linux') {
       throw new AgentError(
         'UNSUPPORTED_OS',
-        'Only Ubuntu Linux is supported',
+        'Only Ubuntu and Alibaba Cloud Linux 3 are supported',
         HttpStatus.UNPROCESSABLE_ENTITY
       )
     }
     const release = parseOsRelease(readFileSync('/etc/os-release', 'utf8'))
-    if (release.ID !== 'ubuntu') {
+    const baota = existsSync('/www/server/panel')
+    const profile = hostProfileFor(release, baota)
+    if (!profile) {
       throw new AgentError(
         'UNSUPPORTED_OS',
-        'Only Ubuntu Linux is supported',
+        'Only Ubuntu and Alibaba Cloud Linux 3 are supported',
         HttpStatus.UNPROCESSABLE_ENTITY
       )
     }
@@ -45,7 +52,13 @@ export class HostInspectorService {
         HttpStatus.UNPROCESSABLE_ENTITY
       )
     }
-    const baota = existsSync('/www/server/panel')
+    if (release.ID === 'alinux' && process.arch !== 'x64') {
+      throw new AgentError(
+        'UNSUPPORTED_HOST_PROFILE',
+        'Alibaba Cloud Linux 3 is supported only on x64 hosts',
+        HttpStatus.UNPROCESSABLE_ENTITY
+      )
+    }
     if (
       baota &&
       (!existsSync('/www/server/nginx') || !existsSync(BAOTA_NGINX_BINARY))
@@ -57,8 +70,8 @@ export class HostInspectorService {
       )
     }
     return {
-      profile: baota ? 'ubuntu-baota' : 'ubuntu',
-      osId: release.ID,
+      profile,
+      osId: hostProfileOsId(profile),
       osVersion: release.VERSION_ID ?? 'unknown',
       architecture: process.arch,
       baota
@@ -112,6 +125,14 @@ export class HostInspectorService {
       { rejectOnNonZero: false, timeoutMs: 5000, maxOutputBytes: 4096 }
     )
     return result.code === 0
+  }
+
+  baotaNginxActive(): boolean {
+    try {
+      return pidFileProcessActive(readFileSync(BAOTA_NGINX_PID_PATH, 'utf8'))
+    } catch {
+      return false
+    }
   }
 
   certificateAvailable(domain: string): boolean {
@@ -199,6 +220,23 @@ export function tcpTableHasListeningPort(value: string, port: number): boolean {
     if (columns.length < 4 || columns[3] !== '0A') return false
     return columns[1]?.split(':').at(-1)?.toUpperCase() === expectedPort
   })
+}
+
+export function pidFileProcessActive(
+  value: string,
+  signalProcess: (pid: number, signal: 0) => boolean = (pid, signal) =>
+    process.kill(pid, signal)
+): boolean {
+  const pid = value.trim()
+  if (!/^[1-9]\d*$/.test(pid)) return false
+  try {
+    signalProcess(Number(pid), 0)
+    return true
+  } catch (error) {
+    // The agent runs unprivileged while BaoTa's Nginx master is root-owned.
+    // kill(pid, 0) reports EPERM when that process exists but cannot be signalled.
+    return systemErrorCode(error) === 'EPERM'
+  }
 }
 
 function systemErrorCode(error: unknown): string {
