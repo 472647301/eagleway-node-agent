@@ -1,6 +1,6 @@
 # 当前 Agent 上线验收
 
-更新日期：2026-10-17。当前源码包版本见 `package.json`（0.1.9）；以实际发布的 commit、tag 和 release-manifest 为验收对象。本轮代码修改没有执行 VPS 灰度，也没有发布 release。
+更新日期：2026-10-17。当前源码包版本见 `package.json`（0.2.0）；以实际发布的 commit、tag 和 release-manifest 为验收对象。本轮代码修改没有执行 VPS 灰度，也没有发布 release。
 
 ## 本地与 CI 入口
 

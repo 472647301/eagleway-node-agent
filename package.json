@@ -1,6 +1,6 @@
 {
   "name": "@eagleway/node-agent",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "description": "Eagleway managed network node agent",
   "private": true,
   "license": "UNLICENSED",
