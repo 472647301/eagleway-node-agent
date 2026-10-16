@@ -31,6 +31,7 @@ import {
   EAGLEWAY_CERTBOT_HOOK_MARKER,
   certbotXrayDeployHook
 } from './host/certificate-renewal'
+import { downloadVerifiedArtifact } from './host/artifact-downloader'
 import {
   BAOTA_NGINX_BINARY,
   BAOTA_NGINX_VHOST_DIRECTORY,
@@ -71,6 +72,8 @@ const runtimeLogPaths = [
   join(runtimeLogDir, 'xray-access.log'),
   join(runtimeLogDir, 'xray-error.log')
 ]
+const runtimeArtifactDownloadTimeoutMs = 10 * 60 * 1000
+const runtimeArtifactMaxBytes = 128 * 1024 * 1024
 const xrayRelease = {
   version: 'v26.3.27',
   assets: {
@@ -1122,20 +1125,13 @@ async function download(
   target: string,
   expectedHash: string
 ): Promise<void> {
-  const response = await fetch(url, {
-    redirect: 'follow',
-    signal: AbortSignal.timeout(120_000)
+  await downloadVerifiedArtifact({
+    url,
+    target,
+    expectedHash,
+    timeoutMs: runtimeArtifactDownloadTimeoutMs,
+    maxBytes: runtimeArtifactMaxBytes
   })
-  if (!response.ok || !response.body) fail('Runtime artifact download failed')
-  if (new URL(response.url).protocol !== 'https:')
-    fail('Runtime artifact redirected outside HTTPS')
-  const length = Number(response.headers.get('content-length') || 0)
-  if (length > 128 * 1024 * 1024) fail('Runtime artifact is too large')
-  const data = Buffer.from(await response.arrayBuffer())
-  if (data.length > 128 * 1024 * 1024) fail('Runtime artifact is too large')
-  if (createHash('sha256').update(data).digest('hex') !== expectedHash)
-    fail('Runtime artifact checksum mismatch')
-  atomicWriteBuffer(target, data, 0o600)
 }
 
 function sha256(path: string): string {

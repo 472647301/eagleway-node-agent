@@ -652,6 +652,8 @@ systemctl is-enabled eagleway-xray.service
 | traffic.report_failed | 中心 URL、DNS、TLS、中心状态 | 恢复后 Agent 自动退避重试 |
 | Xray active 但 status=not_installed | 当前 release、受管标记、运行配置及目录权限 | 核对实际部署与当前 helper 生成的权限，保留日志后按当前部署流程修复 |
 
+Xray 发布包下载采用流式写入，单次下载超时为 10 分钟，并对网络错误、HTTP 408、429 和 5xx 最多尝试 3 次。下载完成后必须通过固定 SHA-256 校验才会进入缓存；失败或超限的临时文件会自动清理。如果仍出现 `Runtime artifact download timed out`，优先检查服务器到 `github.com` 和 `release-assets.githubusercontent.com` 的 DNS、IPv4/IPv6 路由及出口策略。
+
 基础故障采集：
 
 ~~~bash
