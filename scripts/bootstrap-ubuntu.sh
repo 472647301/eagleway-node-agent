@@ -20,6 +20,19 @@ run_dnf() {
   dnf "$@"
 }
 
+ensure_epel_repository() {
+  if rpm -q epel-aliyuncs-release >/dev/null 2>&1 \
+    || rpm -q epel-release >/dev/null 2>&1; then
+    return
+  fi
+
+  if dnf --quiet list --available epel-aliyuncs-release >/dev/null 2>&1; then
+    run_dnf install -y epel-aliyuncs-release
+  else
+    run_dnf install -y epel-release
+  fi
+}
+
 usage() {
   echo "Usage: sudo $0 [release-directory] [env-file]" >&2
   exit 2
@@ -148,7 +161,8 @@ if [[ "${OS_FAMILY}" == "ubuntu" ]]; then
   run_apt_get update
   run_apt_get install -y --no-install-recommends ca-certificates curl gnupg rsync sudo unzip
 else
-  run_dnf install -y ca-certificates curl epel-release rsync shadow-utils sudo unzip util-linux
+  run_dnf install -y ca-certificates curl rsync shadow-utils sudo unzip util-linux
+  ensure_epel_repository
 fi
 
 NODE_MAJOR=0
