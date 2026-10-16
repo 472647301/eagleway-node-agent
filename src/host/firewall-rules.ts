@@ -1,5 +1,9 @@
 export const XRAY_FIREWALL_COMMENT = 'eagleway-node-agent:xray'
 
+export function ufwAllowTcpPortArgs(port: number): string[] {
+  return ['allow', `${port}/tcp`, 'comment', XRAY_FIREWALL_COMMENT]
+}
+
 export function ufwIsActive(output: string): boolean {
   return /^Status:\s+active\s*$/im.test(output)
 }

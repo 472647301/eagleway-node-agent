@@ -41,7 +41,7 @@ import {
   inspectNginxDomain
 } from './host/nginx-acme'
 import {
-  XRAY_FIREWALL_COMMENT,
+  ufwAllowTcpPortArgs,
   ufwAllowsTcpPort,
   ufwIsActive,
   ufwOwnedRuleNumbers
@@ -484,15 +484,26 @@ function ensureBaotaAcmeWebroot(domain: string): string {
   atomicWrite(configPath, baotaAcmeNginxConfig(domain, webroot), 0o644)
   const validation = run(BAOTA_NGINX_BINARY, ['-t'], false)
   if (validation.error || validation.status !== 0) {
+    const message = commandFailureMessage(
+      'BaoTa Nginx configuration validation failed',
+      validation
+    )
     restoreManagedNginxConfig(configPath, previousConfig)
-    fail('BaoTa Nginx configuration validation failed')
+    fail(message)
   }
   const reload = run(BAOTA_NGINX_BINARY, ['-s', 'reload'], false)
   if (reload.error || reload.status !== 0) {
-    restoreManagedNginxConfig(configPath, previousConfig)
-    run(BAOTA_NGINX_BINARY, ['-t'], false)
-    run(BAOTA_NGINX_BINARY, ['-s', 'reload'], false)
-    fail('BaoTa Nginx reload failed')
+    const start = run(BAOTA_NGINX_BINARY, [], false)
+    if (start.error || start.status !== 0) {
+      const message = commandFailureMessage(
+        'BaoTa Nginx could not be reloaded or started',
+        start
+      )
+      restoreManagedNginxConfig(configPath, previousConfig)
+      run(BAOTA_NGINX_BINARY, ['-t'], false)
+      run(BAOTA_NGINX_BINARY, ['-s', 'reload'], false)
+      fail(message)
+    }
   }
   return webroot
 }
@@ -651,7 +662,7 @@ function ensureFirewallPorts(ports: number[]): void {
       if (ufwAllowsTcpPort(status, port)) continue
       run(
         manager.path,
-        ['--force', 'allow', `${port}/tcp`, 'comment', XRAY_FIREWALL_COMMENT],
+        ufwAllowTcpPortArgs(port),
         true,
         `Failed to open TCP port ${port} with UFW`
       )
@@ -1081,8 +1092,7 @@ function run(
     maxBuffer: 1024 * 1024
   })
   if (required && (result.error || result.status !== 0)) {
-    const detail = result.stderr?.replace(/\s+/g, ' ').trim().slice(-500)
-    fail(detail ? `${failureMessage}: ${detail}` : failureMessage)
+    fail(commandFailureMessage(failureMessage, result))
   }
   return result
 }
@@ -1102,10 +1112,22 @@ function runCapture(
     env: { ...process.env, LC_ALL: 'C' }
   })
   if (required && (result.error || result.status !== 0)) {
-    const detail = result.stderr?.replace(/\s+/g, ' ').trim().slice(-500)
-    fail(detail ? `${failureMessage}: ${detail}` : failureMessage)
+    fail(commandFailureMessage(failureMessage, result))
   }
   return result
+}
+
+function commandFailureMessage(
+  failureMessage: string,
+  result: SpawnSyncReturns<string>
+): string {
+  const detail = [result.error?.message, result.stderr]
+    .filter((value): value is string => Boolean(value))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(-500)
+  return detail ? `${failureMessage}: ${detail}` : failureMessage
 }
 
 function assertUbuntu(): void {

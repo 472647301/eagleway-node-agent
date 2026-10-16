@@ -19,6 +19,7 @@ import {
 } from '@/host/nginx-acme'
 import {
   XRAY_FIREWALL_COMMENT,
+  ufwAllowTcpPortArgs,
   ufwAllowsTcpPort,
   ufwIsActive,
   ufwOwnedRuleNumbers
@@ -74,6 +75,15 @@ test('UFW parser distinguishes existing and Eagleway-owned TCP rules', () => {
   assert.equal(ufwAllowsTcpPort(status, 443), false)
   assert.deepEqual(ufwOwnedRuleNumbers(status, 9443), [4, 3])
   assert.deepEqual(ufwOwnedRuleNumbers(status, 80), [])
+})
+
+test('UFW allow arguments use rule syntax without the interactive force flag', () => {
+  assert.deepEqual(ufwAllowTcpPortArgs(18020), [
+    'allow',
+    '18020/tcp',
+    'comment',
+    XRAY_FIREWALL_COMMENT
+  ])
 })
 
 test('BaoTa Nginx parser finds an exact domain and quoted webroot', () => {
