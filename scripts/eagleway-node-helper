@@ -1,4 +1,6 @@
 #!/bin/sh
 set -eu
 
-exec /usr/bin/node /opt/eagleway-node-agent/current/dist/helper.js "$@"
+exec /usr/bin/env -i HOME=/root PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  /opt/eagleway-node-agent/current/runtime/bin/node \
+  /opt/eagleway-node-agent/current/dist/helper.js "$@"

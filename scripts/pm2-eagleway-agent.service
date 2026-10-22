@@ -1,0 +1,21 @@
+[Unit]
+Description=PM2 process manager for Eagleway Node Agent
+After=network.target
+
+[Service]
+Type=forking
+User=eagleway-agent
+WorkingDirectory=/home/eagleway-agent
+Environment=HOME=/home/eagleway-agent
+Environment=PM2_HOME=/home/eagleway-agent/.pm2
+PIDFile=/home/eagleway-agent/.pm2/pm2.pid
+ExecStart=/usr/local/bin/eagleway-agent-pm2 resurrect
+ExecReload=/usr/local/bin/eagleway-agent-pm2 reload all
+ExecStop=/usr/local/bin/eagleway-agent-pm2 kill
+Restart=on-failure
+LimitNOFILE=infinity
+LimitNPROC=infinity
+LimitCORE=infinity
+
+[Install]
+WantedBy=multi-user.target

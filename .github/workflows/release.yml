@@ -29,11 +29,13 @@ jobs:
           version: 11.22.0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .node-version
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --prod
       - run: bash -n scripts/*.sh
+      - run: sh -n scripts/eagleway-agent-pm2 scripts/eagleway-node-helper
       - run: pnpm verify
 
       - name: Build production release
@@ -52,7 +54,8 @@ jobs:
 
           rm -rf "${package_root}" "${output_dir}"
           mkdir -p "${package_root}" "${output_dir}"
-          pnpm --filter @eagleway/node-agent --prod deploy --legacy "${release_dir}"
+          # A fresh deploy directory must receive dependencies even when the workspace is current.
+          pnpm --config.optimistic-repeat-install=false --filter @eagleway/node-agent --prod deploy --legacy "${release_dir}"
 
           if [[ "${RELEASE_ARCH}" == "x64" ]]; then
             docker run --rm \
@@ -60,7 +63,15 @@ jobs:
               --volume "${release_dir}:/app" \
               --workdir /app \
               node:22-bullseye \
-              bash -lc 'npm rebuild better-sqlite3 --build-from-source && node -e "const Database = require(\"better-sqlite3\"); new Database(\":memory:\").close()"'
+              bash -lc '
+                set -Eeuo pipefail
+                source scripts/node-runtime.sh
+                install_managed_node /opt/eagleway-build x64
+                export PATH="/opt/eagleway-build/runtimes/node-v${EAGLEWAY_NODE_VERSION}-linux-x64/bin:$PATH"
+                test "$(node -p process.versions.node)" = "$EAGLEWAY_NODE_VERSION"
+                npm rebuild better-sqlite3 --build-from-source
+                node -e "const Database = require(\"better-sqlite3\"); new Database(\":memory:\").close()"
+              '
           fi
 
           RELEASE_DIR="${release_dir}" node <<'NODE'
@@ -68,7 +79,7 @@ jobs:
           const { join } = require('node:path')
 
           const manifest = {
-            formatVersion: 1,
+            formatVersion: 2,
             packageName: '@eagleway/node-agent',
             packageVersion: require(join(process.env.RELEASE_DIR, 'package.json')).version,
             commit: process.env.RELEASE_COMMIT,
@@ -76,6 +87,9 @@ jobs:
             platform: process.platform,
             arch: process.arch,
             nodeMajor: Number(process.versions.node.split('.')[0]),
+            nodeVersion: process.versions.node,
+            minNodeVersion: '22.23.4',
+            nodeModuleVersion: process.versions.modules,
             builtAt: new Date().toISOString()
           }
           writeFileSync(
@@ -90,6 +104,10 @@ jobs:
           test -x "${release_dir}/scripts/bootstrap-ubuntu.sh"
           test -f "${release_dir}/scripts/deploy-ubuntu-release.sh"
           test -f "${release_dir}/scripts/uninstall-ubuntu.sh"
+          test -f "${release_dir}/scripts/node-runtime.sh"
+          test -f "${release_dir}/scripts/eagleway-agent-pm2"
+          test -f "${release_dir}/scripts/pm2-eagleway-agent.service"
+          test -f "${release_dir}/node_modules/pm2/bin/pm2"
           test -x "${release_dir}/scripts/eagleway-node-helper"
           test -f "${release_dir}/scripts/eagleway-node-agent.sudoers"
           test -f "${release_dir}/ecosystem.config.cjs"

@@ -8,12 +8,27 @@ readonly DEFAULT_CONFIG_ROOT="${XDG_CONFIG_HOME:-${HOME}/.config}/eagleway-node-
 readonly DEFAULT_ENV_FILE="${DEFAULT_CONFIG_ROOT}/agent.env"
 
 usage() {
-  echo "Usage: $0 <release-tag> [env-file]" >&2
+  echo "Usage: $0 <release-tag> [env-file] [--node-bin /absolute/path/node]" >&2
   echo "Example: $0 v0.1.0" >&2
   exit 2
 }
 
-[[ $# -ge 1 && $# -le 2 ]] || usage
+NODE_BIN_INPUT="$(command -v node || true)"
+[[ "${NODE_BIN_INPUT}" == /* ]] || NODE_BIN_INPUT=""
+POSITIONAL_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --node-bin)
+      [[ $# -ge 2 && "$2" == /* ]] || usage
+      NODE_BIN_INPUT="$2"
+      shift 2
+      ;;
+    -*) usage ;;
+    *) POSITIONAL_ARGS+=("$1"); shift ;;
+  esac
+done
+[[ ${#POSITIONAL_ARGS[@]} -ge 1 && ${#POSITIONAL_ARGS[@]} -le 2 ]] || usage
+set -- "${POSITIONAL_ARGS[@]}"
 
 RELEASE_TAG="$1"
 ENV_FILE_INPUT="${2:-${DEFAULT_ENV_FILE}}"
@@ -113,14 +128,16 @@ tar -xzf "${STAGING_DIR}/${ARCHIVE_NAME}" -C "${RELEASE_DIR}"
   exit 1
 }
 
+BOOTSTRAP_ARGS=("${RELEASE_DIR}" "${ENV_FILE}")
+[[ -z "${NODE_BIN_INPUT}" ]] || BOOTSTRAP_ARGS+=(--node-bin "${NODE_BIN_INPUT}")
 if [[ "${EUID}" -eq 0 ]]; then
-  "${RELEASE_DIR}/scripts/bootstrap-ubuntu.sh" "${RELEASE_DIR}" "${ENV_FILE}"
+  "${RELEASE_DIR}/scripts/bootstrap-ubuntu.sh" "${BOOTSTRAP_ARGS[@]}"
 else
-  sudo "${RELEASE_DIR}/scripts/bootstrap-ubuntu.sh" "${RELEASE_DIR}" "${ENV_FILE}"
+  sudo "${RELEASE_DIR}/scripts/bootstrap-ubuntu.sh" "${BOOTSTRAP_ARGS[@]}"
 fi
 
 echo
 echo "Deployment completed. Useful commands:"
-echo "  sudo -u eagleway-agent -H pm2 status"
-echo "  sudo -u eagleway-agent -H pm2 logs eagleway-node-agent --lines 200"
+echo "  sudo -u eagleway-agent -H eagleway-agent-pm2 status"
+echo "  sudo -u eagleway-agent -H eagleway-agent-pm2 logs eagleway-node-agent --lines 200"
 echo "  curl -fsS http://127.0.0.1:8086/api/health"

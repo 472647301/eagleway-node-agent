@@ -2,7 +2,7 @@
 
 状态：当前操作手册
 
-核对日期：2026-10-17
+核对日期：2026-10-22
 
 本文面向负责 Eagleway Network 节点服务器的基础运维人员，描述当前版本可以实际执行的部署、验证、升级、回滚和故障定位流程。接口字段说明见[当前节点契约](node-api-contract.md)，变更时同时核对 Controller/DTO/Service。上线证据见[当前验收清单](release-acceptance.md)，未勾选不代表已完成。
 
@@ -45,6 +45,9 @@ Eagleway Node Agent
 |---|---|---|
 | Agent 进程 | eagleway-node-agent | eagleway-agent 用户下的 PM2 fork 单实例 |
 | 当前发布 | /opt/eagleway-node-agent/current | 指向带时间戳 release 的软链接 |
+| Node 入口与记录 | current/runtime/bin/node、current/runtime/node.json | 绑定该 release 选定的 Node；root 管理 |
+| 专用 Node | /opt/eagleway-node-agent/runtimes | 无合格共享 Node 时安装的官方运行时 |
+| PM2 管理命令 | /usr/local/bin/eagleway-agent-pm2 | 以 eagleway-agent 执行，使用 release 内 PM2 与 Node |
 | 历史发布 | /opt/eagleway-node-agent/releases | 用于人工回滚，不自动清理 |
 | 运行配置 | /etc/eagleway-node-agent/agent.env | root:eagleway-agent，0640 |
 | 加密密钥 | /etc/eagleway-node-agent/state.key | eagleway-agent，0600 |
@@ -73,7 +76,7 @@ Node.apiEndpoint 是 Agent 控制地址，例如 http://node-ip:8086；它不是
 
 - Ubuntu 22.04/24.04（x64 或 arm64），或 Alibaba Cloud Linux 3.2104（x64），systemd 正常运行。
 - root 或 sudo 权限。
-- 能访问系统 apt/dnf 源、NodeSource、npm、nginx.org、EPEL 和 XTLS GitHub Release。
+- 能访问系统 apt/dnf 源、nodejs.org、nginx.org、EPEL 和 XTLS GitHub Release；生产部署不需要 npm/NodeSource 源。
 - 域名具有 A 或 AAAA 记录。
 - 云安全组按需放行 TCP 80、Agent 控制端口和协议端口；已启用的 UFW 或 firewalld 由 Agent 自动放行 80 和协议端口。
 - Agent 控制端口只允许中心出口 IP，不得对整个公网开放。
@@ -151,8 +154,8 @@ git pull --ff-only
 pnpm verify
 git status --short
 git push origin main
-git tag -a v0.2.0 -m "release: v0.2.0"
-git push origin v0.2.0
+git tag -a v0.2.1 -m "release: v0.2.1"
+git push origin v0.2.1
 ~~~
 
 `git status --short` 应无输出。推送 `v*` tag 后，在以下地址查看构建进度：
@@ -160,7 +163,7 @@ git push origin v0.2.0
 - https://github.com/472647301/eagleway-node-agent/actions/workflows/release.yml
 - https://github.com/472647301/eagleway-node-agent/releases
 
-不要移动或强制覆盖已经发布的 tag。发布内容需要修正时，提交修复并创建新的递增版本 tag，例如 `v0.2.0`。
+不要移动或强制覆盖已经发布的 tag。发布内容需要修正时，提交修复并创建新的递增版本 tag，例如 `v0.2.1`。
 
 ### 5.2 VPS 首次部署
 
@@ -169,21 +172,26 @@ Release workflow 在 Linux x64/arm64 runner 上构建对应架构的生产发布
 等待 GitHub Release 中出现 x64 和 arm64 产物后，在 VPS 执行：
 
 ~~~bash
-TAG=v0.2.0
+TAG=v0.2.1
 curl -fsSL "https://raw.githubusercontent.com/472647301/eagleway-node-agent/${TAG}/scripts/deploy-ubuntu-release.sh" -o /tmp/eagleway-deploy.sh
 bash /tmp/eagleway-deploy.sh "${TAG}"
 ~~~
 
 脚本自动识别 `x86_64`/`aarch64`，从公开 GitHub Release 下载对应包和 `.sha256` 文件，完成校验、解压和 Bootstrap。首次运行会创建 `~/.config/eagleway-node-agent/agent.env` 并优先使用 Vim 打开，未安装完整 Vim 时回退到 vi；保存配置后会继续部署。校验失败时脚本不会执行包内 Bootstrap。
 
-Bootstrap 会安装基础运行依赖、Node.js 22 和 PM2 6，校验 release manifest 与本机平台，创建低权限用户，复制 CI 已构建的不可变 release，验证 `better-sqlite3` 原生模块，安装 helper 和 sudo 规则，注册 PM2 开机启动并启动 Agent。VPS 不安装 pnpm、TypeScript、Nest CLI 或编译工具。重复执行会产生新的 release，不会删除 SQLite、state.key、证书或 Xray 用户状态。
+Bootstrap 安装基础系统工具，优先复用 root 所有、组/其他用户不可写且服务用户可执行的 Node.js `>=22.23.4 <23`，依次检查调用者 PATH 中的候选、`/usr/bin/node`、`/usr/local/bin/node` 和现有专用运行时。低版本、其他主版本及用户可写/不可访问路径会被跳过；没有合格版本时，将固定版本/固定 SHA-256 的官方 Node 安装到 `/opt/eagleway-node-agent/runtimes`。可追加 `--node-bin /绝对路径/node` 指定首选候选，普通用户执行部署时会在 sudo 前传递该路径。共享 Node 不被覆盖或降级；其他服务使用的旧共享版本仍需单独更新。
+
+PM2 7.1.0 随 CI release 打包。manifest v2 校验平台、架构、最低 Node 版本及原生模块 ABI。以服务用户加载 `better-sqlite3` 和校验配置完成后才停止旧 daemon、切换 current，并用 `eagleway-agent-pm2` 重建单实例与 systemd 开机启动。VPS 不安装 npm/pnpm 依赖、TypeScript、Nest CLI 或编译工具。重复执行保留 SQLite、state.key、证书和 Xray 用户状态。
+
+旧节点从 0.2.0 升级时，备份步骤中的管理命令仍使用旧版全局 `pm2`；完成新版部署后改用 `eagleway-agent-pm2`。仅重跑旧 Bootstrap 会继续跳过已有旧 Node 22，必须部署新 release。
 
 部署后立即检查：
 
 ~~~bash
 readlink -f /opt/eagleway-node-agent/current
-sudo -u eagleway-agent -H pm2 status
-sudo -u eagleway-agent -H pm2 describe eagleway-node-agent
+cat /opt/eagleway-node-agent/current/runtime/node.json
+sudo -u eagleway-agent -H eagleway-agent-pm2 status
+sudo -u eagleway-agent -H eagleway-agent-pm2 describe eagleway-node-agent
 curl -sS http://127.0.0.1:8086/api/health
 sudo -u eagleway-agent -H sudo -n -l
 ~~~
@@ -191,6 +199,7 @@ sudo -u eagleway-agent -H sudo -n -l
 期望：
 
 - PM2 状态为 online、exec mode 为 fork、instances 为 1。
+- PM2 describe 中实际 Node 版本至少为 22.23.4；`systemctl show pm2-eagleway-agent.service -p MainPID` 对应进程的 `/proc/<PID>/exe` 应指向选定 Node。不能只根据登录终端的 `node -v` 判断升级完成。
 - 健康接口返回 code=0 和 status=ok。
 - sudo 列表只包含 eagleway-node-helper 的固定动作。
 
@@ -199,22 +208,22 @@ sudo -u eagleway-agent -H sudo -n -l
 仅重启 Agent，不发布新源码：
 
 ~~~bash
-sudo -u eagleway-agent -H pm2 restart eagleway-node-agent
+sudo -u eagleway-agent -H eagleway-agent-pm2 restart eagleway-node-agent
 ~~~
 
 修改了 /etc/eagleway-node-agent/agent.env 后重载环境：
 
 ~~~bash
-sudo -u eagleway-agent -H pm2 restart eagleway-node-agent --update-env
+sudo -u eagleway-agent -H eagleway-agent-pm2 restart eagleway-node-agent --update-env
 ~~~
 
 查看状态和日志：
 
 ~~~bash
-sudo -u eagleway-agent -H pm2 status
-sudo -u eagleway-agent -H pm2 describe eagleway-node-agent
-sudo -u eagleway-agent -H pm2 logs eagleway-node-agent --nostream --lines 200
-sudo -u eagleway-agent -H pm2 logs eagleway-node-agent --lines 200
+sudo -u eagleway-agent -H eagleway-agent-pm2 status
+sudo -u eagleway-agent -H eagleway-agent-pm2 describe eagleway-node-agent
+sudo -u eagleway-agent -H eagleway-agent-pm2 logs eagleway-node-agent --nostream --lines 200
+sudo -u eagleway-agent -H eagleway-agent-pm2 logs eagleway-node-agent --lines 200
 sudo tail -n 200 /var/log/eagleway-node-agent/agent-error.log
 sudo tail -F /var/log/eagleway-node-agent/agent.log
 sudo journalctl -u eagleway-xray.service -n 200 --no-pager
@@ -533,7 +542,7 @@ cat /opt/eagleway-node-agent/current/release-manifest.json
 确认没有活动操作后停止 Agent。Xray systemd 服务会继续承载已有代理流量，但维护期间中心不能控制节点。
 
 ~~~bash
-sudo -u eagleway-agent -H pm2 stop eagleway-node-agent
+sudo -u eagleway-agent -H eagleway-agent-pm2 stop eagleway-node-agent
 BACKUP_DIR="/var/backups/eagleway-node-agent/$(date -u +%Y%m%d%H%M%S)"
 sudo install -d -m 0700 "$BACKUP_DIR"
 sudo cp -a /etc/eagleway-node-agent "$BACKUP_DIR/config"
@@ -550,7 +559,7 @@ printf '%s\n' "$BACKUP_DIR"
 公开仓库无需 deploy key、源码 checkout、pnpm 或开发依赖。确认对应 tag 的 Release workflow 成功后执行：
 
 ~~~bash
-bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.2.0
+bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.2.1
 ~~~
 
 脚本会自动选择本机架构并验证 SHA-256。需要部署指定配置文件时，将其作为第二个参数传入。
@@ -559,10 +568,10 @@ bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.2.0
 
 便捷部署脚本会自动调用 Bootstrap 并切换 release，无需再手工执行解压或 Bootstrap 命令。
 
-如果 bootstrap 在 PM2 切换前失败，可恢复旧 Agent：
+如果 bootstrap 在 PM2 切换前失败，可恢复旧 Agent（首次从 0.2.0 升级且新版命令尚未安装时，用原全局 `pm2`）：
 
 ~~~bash
-sudo -u eagleway-agent -H pm2 restart eagleway-node-agent
+sudo -u eagleway-agent -H eagleway-agent-pm2 restart eagleway-node-agent
 ~~~
 
 如果下载、校验、解压或 bootstrap 失败，也应立即执行上述命令恢复旧 Agent，再处理发布包问题。
@@ -571,7 +580,7 @@ sudo -u eagleway-agent -H pm2 restart eagleway-node-agent
 
 ~~~bash
 readlink -f /opt/eagleway-node-agent/current
-sudo -u eagleway-agent -H pm2 describe eagleway-node-agent
+sudo -u eagleway-agent -H eagleway-agent-pm2 describe eagleway-node-agent
 curl -sS http://127.0.0.1:8086/api/health
 sudo systemctl is-active eagleway-xray.service
 ~~~
@@ -590,28 +599,36 @@ sudo systemctl is-active eagleway-xray.service
 
 ## 10. 人工回滚
 
-仅当旧代码兼容当前 SQLite schema 时执行。若新版本执行了不可逆数据库迁移，必须按该版本的迁移说明处理。
+仅当旧代码兼容当前 SQLite schema 时执行。若新版本执行了不可逆数据库迁移，必须按该版本的迁移说明处理。以下命令仅适用于具有 `runtime/bin/node`、新版 helper 与随包 PM2 的新格式 release。0.2.0 及之前的 release 会恢复对 `/usr/bin/node` 的依赖，需先用安全运行时重新打包验证，不直接切回旧格式。
 
 列出 release 并明确选择目标，禁止使用模糊通配符：
 
 ~~~bash
 ls -1dt /opt/eagleway-node-agent/releases/*
-PREVIOUS_RELEASE=/opt/eagleway-node-agent/releases/20260908054133
+PREVIOUS_RELEASE=/opt/eagleway-node-agent/releases/20261022000000-0123456789ab
 sudo test -f "$PREVIOUS_RELEASE/ecosystem.config.cjs"
 sudo test -f "$PREVIOUS_RELEASE/dist/main.js"
+sudo test -x "$PREVIOUS_RELEASE/runtime/bin/node"
+sudo test -f "$PREVIOUS_RELEASE/node_modules/pm2/bin/pm2"
+sudo -u eagleway-agent -H "$PREVIOUS_RELEASE/runtime/bin/node" -p 'process.versions.node'
 ~~~
 
 切换：
 
 ~~~bash
-sudo -u eagleway-agent -H pm2 delete eagleway-node-agent
+sudo systemctl stop pm2-eagleway-agent.service
 sudo ln -sfn "$PREVIOUS_RELEASE" /opt/eagleway-node-agent/current
 sudo ln -sfn /etc/eagleway-node-agent/agent.env "$PREVIOUS_RELEASE/.env"
 sudo install -o root -g root -m 0755 "$PREVIOUS_RELEASE/scripts/eagleway-node-helper" /usr/local/libexec/eagleway-node-helper
+sudo install -o root -g root -m 0755 "$PREVIOUS_RELEASE/scripts/eagleway-agent-pm2" /usr/local/bin/eagleway-agent-pm2
+sudo install -o root -g root -m 0644 "$PREVIOUS_RELEASE/scripts/pm2-eagleway-agent.service" /etc/systemd/system/pm2-eagleway-agent.service
 sudo install -o root -g root -m 0440 "$PREVIOUS_RELEASE/scripts/eagleway-node-agent.sudoers" /etc/sudoers.d/eagleway-node-agent
 sudo visudo -cf /etc/sudoers.d/eagleway-node-agent
-sudo -u eagleway-agent env HOME=/home/eagleway-agent pm2 start /opt/eagleway-node-agent/current/ecosystem.config.cjs
-sudo -u eagleway-agent env HOME=/home/eagleway-agent pm2 save
+sudo -u eagleway-agent env HOME=/home/eagleway-agent eagleway-agent-pm2 start /opt/eagleway-node-agent/current/ecosystem.config.cjs
+sudo -u eagleway-agent env HOME=/home/eagleway-agent eagleway-agent-pm2 save
+sudo -u eagleway-agent -H eagleway-agent-pm2 kill
+sudo systemctl daemon-reload
+sudo systemctl start pm2-eagleway-agent.service
 ~~~
 
 按第 9.5 节重新验证。只有确认需要且不存在新版本写入后，才考虑停止 Agent 并恢复备份的配置/SQLite；中心是业务事实源，恢复旧 SQLite 后通常还需要中心再次完整同步用户。
@@ -621,7 +638,7 @@ sudo -u eagleway-agent env HOME=/home/eagleway-agent pm2 save
 Agent 重启：
 
 ~~~bash
-sudo -u eagleway-agent -H pm2 restart eagleway-node-agent
+sudo -u eagleway-agent -H eagleway-agent-pm2 restart eagleway-node-agent
 ~~~
 
 Xray 重启必须通过 Agent API start/stop；不要用 systemctl 绕过 Agent 进行日常控制。紧急排障后如果直接操作过 systemctl，必须再次查询 Agent status 和 traffic。
@@ -629,7 +646,7 @@ Xray 重启必须通过 Agent API start/stop；不要用 systemctl 绕过 Agent 
 服务器重启前：
 
 ~~~bash
-sudo -u eagleway-agent -H pm2 save
+sudo -u eagleway-agent -H eagleway-agent-pm2 save
 systemctl is-enabled pm2-eagleway-agent.service
 systemctl is-enabled eagleway-xray.service
 ~~~
@@ -658,8 +675,8 @@ Xray 发布包下载采用流式写入，单次下载超时为 10 分钟，并�
 
 ~~~bash
 readlink -f /opt/eagleway-node-agent/current
-sudo -u eagleway-agent -H pm2 describe eagleway-node-agent
-sudo -u eagleway-agent -H pm2 logs eagleway-node-agent --nostream --lines 200
+sudo -u eagleway-agent -H eagleway-agent-pm2 describe eagleway-node-agent
+sudo -u eagleway-agent -H eagleway-agent-pm2 logs eagleway-node-agent --nostream --lines 200
 sudo systemctl status eagleway-xray.service --no-pager -l
 sudo journalctl -u eagleway-xray.service -n 200 --no-pager
 sudo ss -ltnp
@@ -683,7 +700,7 @@ command -v certbot >/dev/null && sudo certbot certificates
 
 ~~~bash
 curl -fsS http://127.0.0.1:8086/api/health
-sudo -u eagleway-agent -H pm2 status
+sudo -u eagleway-agent -H eagleway-agent-pm2 status
 sudo systemctl is-active eagleway-xray.service
 df -h /opt /var /etc
 du -sh /opt/eagleway-node-agent/releases /var/lib/eagleway-node-agent /var/log/eagleway-node-agent

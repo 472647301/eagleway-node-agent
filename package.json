@@ -1,6 +1,6 @@
 {
   "name": "@eagleway/node-agent",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Eagleway managed network node agent",
   "private": true,
   "license": "UNLICENSED",
@@ -11,11 +11,14 @@
     "scripts/bootstrap-ubuntu.sh",
     "scripts/deploy-ubuntu-release.sh",
     "scripts/uninstall-ubuntu.sh",
+    "scripts/node-runtime.sh",
+    "scripts/eagleway-agent-pm2",
+    "scripts/pm2-eagleway-agent.service",
     "scripts/eagleway-node-agent.sudoers",
     "scripts/eagleway-node-helper"
   ],
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.23.4 <23"
   },
   "scripts": {
     "build": "nest build",
@@ -29,24 +32,25 @@
     "verify": "pnpm format:check && pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {
-    "@grpc/grpc-js": "^1.13.4",
-    "@nestjs/common": "^11.0.1",
-    "@nestjs/core": "^11.0.1",
-    "@nestjs/platform-express": "^11.0.1",
+    "@grpc/grpc-js": "^1.14.5",
+    "@nestjs/common": "^11.2.7",
+    "@nestjs/core": "^11.2.7",
+    "@nestjs/platform-express": "^11.2.7",
     "@nestjs/schedule": "^6.1.1",
     "@nestjs/swagger": "^11.2.6",
     "better-sqlite3": "^12.2.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
-    "compression": "^1.8.1",
+    "compression": "^1.8.2",
     "dotenv": "^17.2.2",
     "helmet": "^8.1.0",
+    "pm2": "7.1.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",
-    "@nestjs/testing": "^11.0.1",
+    "@nestjs/testing": "^11.2.7",
     "@types/better-sqlite3": "^7.6.13",
     "@types/compression": "^1.8.1",
     "@types/express": "^5.0.6",

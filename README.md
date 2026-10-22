@@ -52,6 +52,8 @@ Agent 不是中心数据库的副本。中心服务始终是节点配置、用�
 
 当前版本使用中心固定出口 IP 白名单限制控制接口访问。公网传输仍建议使用 HTTPS；如果暂时使用 HTTP，必须同时在云安全组和主机防火墙限制来源，不得将控制端口开放给任意公网地址。
 
+0.2.1 一并更新 Node.js 运行时及 compression、gRPC、proxy-addr、Multer、js-yaml 的安全依赖版本。CI 和发布流水线执行 `pnpm audit --prod`；具体锁定版本与验证边界见[上线验收](docs/release-acceptance.md)。
+
 用户 credential、证书私钥、完整连接配置和命令参数不得写入普通日志。`assignmentId` 是非秘密的稳定业务标识。
 
 ## 本地开发
@@ -63,6 +65,8 @@ pnpm install
 pnpm verify
 ```
 
+开发和 CI 使用 `.node-version` 指定的 Node.js 22.23.4；nvm 用户可先执行 `nvm install 22.23.4 && nvm use 22.23.4`。
+
 ## 发布新版本
 
 版本代码合并到 `main` 并确认工作区干净后，创建并推送一个新的 `v*` tag：
@@ -73,8 +77,8 @@ git pull --ff-only
 pnpm verify
 git status --short
 git push origin main
-git tag -a v0.2.0 -m "release: v0.2.0"
-git push origin v0.2.0
+git tag -a v0.2.1 -m "release: v0.2.1"
+git push origin v0.2.1
 ```
 
 `git status --short` 应无输出。tag 推送后可在 [Release workflow](https://github.com/472647301/eagleway-node-agent/actions/workflows/release.yml) 查看构建进度；成功后产物会发布到 [GitHub Releases](https://github.com/472647301/eagleway-node-agent/releases)。已经发布的 tag 不要强制覆盖，修复后创建新的递增版本 tag。
@@ -91,7 +95,7 @@ git push origin v0.2.0
 Release workflow 完成后，在 VPS 上只需下载同一个 tag 中的部署脚本并运行：
 
 ```bash
-TAG=v0.2.0
+TAG=v0.2.1
 curl -fsSL "https://raw.githubusercontent.com/472647301/eagleway-node-agent/${TAG}/scripts/deploy-ubuntu-release.sh" -o /tmp/eagleway-deploy.sh
 bash /tmp/eagleway-deploy.sh "${TAG}"
 ```
@@ -99,7 +103,7 @@ bash /tmp/eagleway-deploy.sh "${TAG}"
 脚本会自动识别 x64/arm64、下载 release 和校验文件、验证 SHA-256、解压并调用 Bootstrap。文件名为兼容旧版本仍保留 `ubuntu`，但脚本会读取 `/etc/os-release` 并支持 Ubuntu 与 Alibaba Cloud Linux 3。首次运行会创建 `~/.config/eagleway-node-agent/agent.env` 并打开编辑器；至少填写 `NODE_ID`、`ALLOWED_CIDRS` 和 `REPORTING_ENABLED`。服务器带宽由中心 API 自行维护，不需要写入 Agent 配置。后续升级只需：
 
 ```bash
-bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.2.0
+bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.2.1
 ```
 
 部署后常用检查：
@@ -114,13 +118,23 @@ sudo firewall-cmd --state                 # Alibaba Cloud Linux 3
 安装或修改 Xray 配置时，受限 helper 会在已启用的 UFW 或 firewalld 中自动放行 TCP 80 和当前协议端口；云安全组仍需在云平台配置。
 
 ```bash
-sudo -u eagleway-agent -H pm2 status
-sudo -u eagleway-agent -H pm2 describe eagleway-node-agent
-sudo -u eagleway-agent -H pm2 logs eagleway-node-agent --nostream --lines 200
+sudo -u eagleway-agent -H eagleway-agent-pm2 status
+sudo -u eagleway-agent -H eagleway-agent-pm2 describe eagleway-node-agent
+sudo -u eagleway-agent -H eagleway-agent-pm2 logs eagleway-node-agent --nostream --lines 200
 curl -fsS http://127.0.0.1:8086/api/health
 ```
 
-Bootstrap 会校验 release manifest、平台、CPU 架构和 Node.js 主版本，创建低权限用户，安装 Node.js 22 和 PM2，复制 CI 构建产物，安装受限 helper 并配置单实例开机启动；服务器不再运行 `pnpm install` 或 Nest/TypeScript 构建。应用发布目录和 helper 均归 root 所有，Agent 用户只有状态、密钥和日志目录所需权限。
+Bootstrap 要求 Node.js `>=22.23.4 <23`，会优先复用调用者 PATH 中符合条件的已有 Node，再检查系统路径。Node 二进制、符号链接路径及目标的各级目录必须归 root 所有、不可由组或其他用户写入，且 `eagleway-agent` 能执行。低版本、其他主版本、用户可写的 nvm 安装或不可访问的路径会被跳过；没有合格版本时，从 nodejs.org 下载固定 SHA-256 校验的官方 22.23.4，安装到 `/opt/eagleway-node-agent/runtimes`。共享 Node 不会被升级、降级或删除。
+
+可显式指定已有 Node，部署脚本会在 sudo 前保存路径，并在提权后检查；不合格时仍自动选择其他合格版本或专用运行时：
+
+```bash
+bash /tmp/eagleway-deploy.sh "${TAG}" --node-bin /usr/local/bin/node
+```
+
+PM2 7.1.0 随 release 打包，管理命令统一为 `eagleway-agent-pm2`。Bootstrap 校验平台、架构和原生模块 ABI，以服务用户加载 `better-sqlite3` 后才切换 release；选定的 Node 记录在 `current/runtime/node.json`，Agent、PM2 daemon、helper、卸载和 systemd 开机启动使用同一个运行时。升级会重建专用 PM2 daemon。服务器不执行 npm/pnpm 安装或 Nest/TypeScript 构建。应用发布目录和 helper 均归 root 所有，Agent 用户只有状态、密钥和日志目录所需权限。
+
+旧节点应备份配置与 SQLite 后部署新 release；只重新运行旧版 Bootstrap 不会修复它对旧 Node 22 的跳过逻辑。部署后检查 PM2 显示的实际 Node 版本及健康接口。其他服务仍在使用的旧共享 Node，需要由运维单独安排安全更新。
 
 首次部署、服务器本机全功能自测、与中心联调、源码升级和人工回滚的可执行步骤见[运维与服务器自测手册](docs/operations-runbook.md)。
 

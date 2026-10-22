@@ -1,8 +1,14 @@
+const { existsSync } = require('node:fs')
+const { join } = require('node:path')
+const runtimeNode = join(__dirname, 'runtime/bin/node')
+const hasRuntime = existsSync(join(__dirname, 'runtime'))
+
 module.exports = {
   apps: [
     {
       name: 'eagleway-node-agent',
       script: './dist/main.js',
+      interpreter: hasRuntime ? runtimeNode : process.execPath,
       cwd: __dirname,
       exec_mode: 'fork',
       instances: 1,

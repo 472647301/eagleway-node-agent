@@ -1,12 +1,18 @@
 # 当前安装与运维边界
 
-核对日期：2026-10-17。可执行步骤见[操作手册](operations-runbook.md)，本页说明当前脚本能做什么和需要人工完成什么。
+核对日期：2026-10-22。可执行步骤见[操作手册](operations-runbook.md)，本页说明当前脚本能做什么和需要人工完成什么。
 
 ## 发布与 Bootstrap
 
 当前 `.github/workflows/release.yml` 在 v* tag 或手动触发时验证并构建 Linux x64/arm64 release，包含生产依赖、dist、manifest、Bootstrap 与 helper，并生成 SHA-256 文件。
 
-`scripts/deploy-ubuntu-release.sh` 下载和校验对应架构 artifact，维护独立 env 文件，随后调用 `scripts/bootstrap-ubuntu.sh`。两个文件名为兼容旧发布保留，实际支持 Ubuntu 与 Alibaba Cloud Linux 3。Bootstrap 校验系统、产物和配置，通过 apt 或 dnf 准备 Node.js 22、PM2 6、低权限运行用户、配置/状态/日志目录、root 所有的不可变 release、helper 和 sudo 规则，再切换 current 并重建 PM2 单实例。
+0.2.1 同时包含 Node.js 运行时更新和生产依赖安全补丁。源码与锁文件更新后，由 CI/Release 执行生产依赖审计及项目验证，服务器直接升级新 release；生产机不自行修改 `node_modules`。当前修复版本与本地验证结果见[上线验收](release-acceptance.md)。
+
+生产 deploy 显式关闭 pnpm 的 `optimisticRepeatInstall`，避免重复打包时因源工作区已是最新而跳过新发布目录的依赖安装；打包后还会检查 PM2、原生模块与开发依赖隔离。
+
+`scripts/deploy-ubuntu-release.sh` 下载和校验对应架构 artifact，维护独立 env 文件，随后调用 `scripts/bootstrap-ubuntu.sh`。两个文件名为兼容旧发布保留，实际支持 Ubuntu 与 Alibaba Cloud Linux 3。Bootstrap 通过 apt/dnf 安装基础系统工具，优先复用 root 所有且服务用户可执行的 Node.js `>=22.23.4 <23`，无合格版本时下载固定版本/校验和的官方 Node 到 `/opt/eagleway-node-agent/runtimes`，不覆盖共享 Node。可用 `--node-bin /绝对路径/node` 指定候选；nvm 用户可写路径不能用于 root helper，会自动跳过。
+
+PM2 7.1.0 是发布包的生产依赖，服务器不再安装全局 PM2/npm。manifest v2 记录构建 Node 版本、最低版本和原生模块 ABI；Bootstrap 校验后创建低权限用户、配置/状态/日志目录和 root 所有的 release。每个 release 的 `runtime/bin/node` 固定到选定 Node，`runtime/node.json` 记录版本和路径；Agent、helper、`eagleway-agent-pm2` 与 `pm2-eagleway-agent.service` 共同使用该入口。切换时停止旧 PM2 daemon，并用新运行时重建、保存单实例及注册开机启动。
 
 主要路径为 `/opt/eagleway-node-agent/releases`、`/opt/eagleway-node-agent/current`、`/etc/eagleway-node-agent`、`/var/lib/eagleway-node-agent`、`/var/log/eagleway-node-agent`。数据库与 state.key 需要一起备份；发布目录不可由 Agent 用户改写。
 

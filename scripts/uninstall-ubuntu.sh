@@ -11,6 +11,7 @@ readonly HELPER_PATH="/usr/local/libexec/eagleway-node-helper"
 readonly SUDOERS_PATH="/etc/sudoers.d/eagleway-node-agent"
 readonly PM2_UNIT="pm2-eagleway-agent.service"
 readonly PM2_UNIT_PATH="/etc/systemd/system/${PM2_UNIT}"
+readonly PM2_WRAPPER=/usr/local/bin/eagleway-agent-pm2
 readonly XRAY_MARKER="${CONFIG_ROOT}/runtimes/xray/.managed-by-eagleway-node-agent"
 readonly AGENT_FIREWALL_ZONE_FILE="${CONFIG_ROOT}/agent-firewall-zone"
 
@@ -51,6 +52,8 @@ done
   echo "Uninstaller must run as root" >&2
   exit 1
 }
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+unset NODE_OPTIONS NODE_PATH
 
 if [[ "${ASSUME_YES}" != "true" ]]; then
   [[ -t 0 ]] || {
@@ -102,17 +105,23 @@ AGENT_PORT="$(env_value PORT || true)"
 ALLOWED_CIDRS="$(env_value ALLOWED_CIDRS || true)"
 
 echo "Stopping Eagleway Node Agent..."
-if id "${AGENT_USER}" >/dev/null 2>&1 && command -v pm2 >/dev/null 2>&1; then
+PM2_COMMAND=""
+if [[ -x "${PM2_WRAPPER}" && -x "${INSTALL_ROOT}/current/runtime/bin/node" ]]; then
+  PM2_COMMAND="${PM2_WRAPPER}"
+elif command -v pm2 >/dev/null 2>&1; then
+  PM2_COMMAND="$(command -v pm2)"
+fi
+if id "${AGENT_USER}" >/dev/null 2>&1 && [[ -n "${PM2_COMMAND}" ]]; then
   PM2_WORKING_DIRECTORY="${AGENT_HOME}"
   [[ -d "${PM2_WORKING_DIRECTORY}" ]] || PM2_WORKING_DIRECTORY=/
   (
     cd "${PM2_WORKING_DIRECTORY}"
     runuser -u "${AGENT_USER}" -- env HOME="${AGENT_HOME}" \
-      pm2 delete eagleway-node-agent >/dev/null 2>&1 || true
+      "${PM2_COMMAND}" delete eagleway-node-agent >/dev/null 2>&1 || true
     runuser -u "${AGENT_USER}" -- env HOME="${AGENT_HOME}" \
-      pm2 save --force >/dev/null 2>&1 || true
+      "${PM2_COMMAND}" save --force >/dev/null 2>&1 || true
     runuser -u "${AGENT_USER}" -- env HOME="${AGENT_HOME}" \
-      pm2 kill >/dev/null 2>&1 || true
+      "${PM2_COMMAND}" kill >/dev/null 2>&1 || true
   )
 fi
 systemctl disable --now "${PM2_UNIT}" >/dev/null 2>&1 || true
@@ -121,7 +130,12 @@ if [[ -e "${XRAY_MARKER}" ]]; then
   echo "Removing the managed Xray runtime..."
   if [[ -x "${HELPER_PATH}" ]]; then
     "${HELPER_PATH}" xray-uninstall
-  elif [[ -f "${INSTALL_ROOT}/current/dist/helper.js" && -x /usr/bin/node ]]; then
+  elif [[ -f "${INSTALL_ROOT}/current/dist/helper.js" && -x "${INSTALL_ROOT}/current/runtime/bin/node" ]]; then
+    env -i HOME=/root PATH="${PATH}" "${INSTALL_ROOT}/current/runtime/bin/node" \
+      "${INSTALL_ROOT}/current/dist/helper.js" xray-uninstall
+  elif [[ ! -d "${INSTALL_ROOT}/current/runtime" \
+    && -f "${INSTALL_ROOT}/current/dist/helper.js" && -x /usr/bin/node ]]; then
+    # Legacy releases did not record a private runtime.
     /usr/bin/node "${INSTALL_ROOT}/current/dist/helper.js" xray-uninstall
   else
     echo "Managed Xray resources exist, but the trusted helper is unavailable." >&2
@@ -176,7 +190,7 @@ if [[ "${AGENT_PORT}" =~ ^[0-9]+$ && -n "${ALLOWED_CIDRS}" ]]; then
 fi
 rm -f -- "${AGENT_FIREWALL_ZONE_FILE}"
 
-rm -f -- "${SUDOERS_PATH}" "${HELPER_PATH}" "${PM2_UNIT_PATH}"
+rm -f -- "${SUDOERS_PATH}" "${HELPER_PATH}" "${PM2_UNIT_PATH}" "${PM2_WRAPPER}"
 systemctl daemon-reload
 systemctl reset-failed "${PM2_UNIT}" >/dev/null 2>&1 || true
 rm -rf -- "${INSTALL_ROOT}"

@@ -34,14 +34,32 @@ ensure_epel_repository() {
 }
 
 usage() {
-  echo "Usage: sudo $0 [release-directory] [env-file]" >&2
+  echo "Usage: sudo $0 [release-directory] [env-file] [--node-bin /absolute/path/node]" >&2
   exit 2
 }
 
 [[ "${EUID}" -eq 0 ]] || { echo "Bootstrap must run as root" >&2; exit 1; }
-[[ $# -le 2 ]] || usage
+NODE_BIN_INPUT="$(command -v node || true)"
+POSITIONAL_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --node-bin)
+      [[ $# -ge 2 && "$2" == /* ]] || usage
+      NODE_BIN_INPUT="$2"
+      shift 2
+      ;;
+    -*) usage ;;
+    *) POSITIONAL_ARGS+=("$1"); shift ;;
+  esac
+done
+[[ ${#POSITIONAL_ARGS[@]} -le 2 ]] || usage
+set -- "${POSITIONAL_ARGS[@]}"
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+unset NODE_OPTIONS NODE_PATH
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=node-runtime.sh
+. "${SCRIPT_DIR}/node-runtime.sh"
 RELEASE_SOURCE_DIR="$(realpath "${1:-${SCRIPT_DIR}/..}")"
 ENV_FILE_INPUT="${2:-${RELEASE_SOURCE_DIR}/.env}"
 [[ -f "${ENV_FILE_INPUT}" ]] || { echo "Missing environment file: ${ENV_FILE_INPUT}" >&2; exit 1; }
@@ -130,9 +148,12 @@ esac
   && -f "${RELEASE_SOURCE_DIR}/ecosystem.config.cjs" \
   && -f "${RELEASE_SOURCE_DIR}/scripts/deploy-ubuntu-release.sh" \
   && -f "${RELEASE_SOURCE_DIR}/scripts/uninstall-ubuntu.sh" \
+  && -f "${RELEASE_SOURCE_DIR}/scripts/node-runtime.sh" \
+  && -f "${RELEASE_SOURCE_DIR}/scripts/eagleway-agent-pm2" \
+  && -f "${RELEASE_SOURCE_DIR}/scripts/pm2-eagleway-agent.service" \
   && -f "${RELEASE_SOURCE_DIR}/scripts/eagleway-node-helper" \
   && -f "${RELEASE_SOURCE_DIR}/scripts/eagleway-node-agent.sudoers" \
-  && -d "${RELEASE_SOURCE_DIR}/node_modules" ]] || {
+  && -f "${RELEASE_SOURCE_DIR}/node_modules/pm2/bin/pm2" ]] || {
   echo "Release directory is incomplete; use a CI-built Eagleway release artifact" >&2
   exit 1
 }
@@ -159,79 +180,53 @@ assert_fixed_env PRIVILEGED_HELPER /usr/local/libexec/eagleway-node-helper
 if [[ "${OS_FAMILY}" == "ubuntu" ]]; then
   export DEBIAN_FRONTEND=noninteractive
   run_apt_get update
-  run_apt_get install -y --no-install-recommends ca-certificates curl gnupg rsync sudo unzip
+  run_apt_get install -y --no-install-recommends ca-certificates curl rsync sudo unzip xz-utils
 else
-  run_dnf install -y ca-certificates curl rsync shadow-utils sudo unzip util-linux
+  run_dnf install -y ca-certificates curl rsync shadow-utils sudo unzip util-linux xz
   ensure_epel_repository
 fi
 
-NODE_MAJOR=0
-if command -v node >/dev/null 2>&1; then
-  NODE_MAJOR="$(node -p "Number(process.versions.node.split('.')[0])")"
-fi
-if (( NODE_MAJOR != 22 )); then
-  if [[ "${OS_FAMILY}" == "ubuntu" ]]; then
-    install -d -m 0755 /etc/apt/keyrings
-    curl --fail --silent --show-error --location \
-      https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-      --output /tmp/eagleway-nodesource.gpg.key
-    gpg --dearmor --yes --output /etc/apt/keyrings/nodesource.gpg /tmp/eagleway-nodesource.gpg.key
-    rm -f /tmp/eagleway-nodesource.gpg.key
-    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
-      > /etc/apt/sources.list.d/nodesource.list
-    run_apt_get update
-    run_apt_get install -y --allow-downgrades --no-install-recommends nodejs
-  else
-    cat > /etc/yum.repos.d/nodesource-nodejs.repo <<'EOF'
-[nodesource-nodejs]
-name=Node.js Packages for Linux RPM based distros
-baseurl=https://rpm.nodesource.com/pub_22.x/nodistro/nodejs/$basearch
-priority=9
-enabled=1
-gpgcheck=1
-gpgkey=https://rpm.nodesource.com/gpgkey/ns-operations-public.key
-module_hotfixes=1
-EOF
-    run_dnf makecache --disablerepo='*' --enablerepo=nodesource-nodejs
-    run_dnf install -y --allowerasing nodejs
-  fi
-fi
-
-node -e "if (Number(process.versions.node.split('.')[0]) !== 22) process.exit(1)"
-[[ -x /usr/bin/node ]] || {
-  echo "Node.js 22 must be available at /usr/bin/node" >&2
+case "$(uname -m)" in
+  x86_64) RELEASE_ARCH=x64 ;;
+  aarch64 | arm64) RELEASE_ARCH=arm64 ;;
+  *) echo "Unsupported CPU architecture" >&2; exit 1 ;;
+esac
+# Refuse an existing writable installation before placing root-executed files in it.
+TRUSTED_PARENT="${INSTALL_ROOT}"
+while [[ ! -e "${TRUSTED_PARENT}" && ! -L "${TRUSTED_PARENT}" ]]; do
+  TRUSTED_PARENT="$(dirname -- "${TRUSTED_PARENT}")"
+done
+trusted_path_chain "${TRUSTED_PARENT}" || {
+  echo "Installation path must be root-owned and not writable by other users: ${TRUSTED_PARENT}" >&2
   exit 1
 }
+trusted_path_chain "$(realpath -e -- "${TRUSTED_PARENT}")" || exit 1
+if [[ -e "${INSTALL_ROOT}/runtimes" || -L "${INSTALL_ROOT}/runtimes" ]]; then
+  trusted_path_chain "${INSTALL_ROOT}/runtimes" || exit 1
+  trusted_path_chain "$(realpath -e -- "${INSTALL_ROOT}/runtimes")" || exit 1
+fi
+if ! id "${AGENT_USER}" >/dev/null 2>&1; then
+  useradd --create-home --shell /usr/sbin/nologin "${AGENT_USER}"
+fi
+select_node_runtime "${NODE_BIN_INPUT}" "${INSTALL_ROOT}" "${RELEASE_ARCH}" "${AGENT_USER}"
 
-RELEASE_COMMIT="$(RELEASE_MANIFEST="${RELEASE_MANIFEST}" node -e '
+RELEASE_COMMIT="$(RELEASE_MANIFEST="${RELEASE_MANIFEST}" MIN_NODE_VERSION="${EAGLEWAY_NODE_MIN_VERSION}" "${NODE_BIN}" -e '
   const fs = require("node:fs")
   const manifest = JSON.parse(fs.readFileSync(process.env.RELEASE_MANIFEST, "utf8"))
   const nodeMajor = Number(process.versions.node.split(".")[0])
-  if (manifest.formatVersion !== 1) throw new Error("Unsupported release manifest format")
+  if (manifest.formatVersion !== 2) throw new Error("Unsupported release manifest format")
   if (manifest.packageName !== "@eagleway/node-agent") throw new Error("Unexpected package name")
   if (manifest.platform !== process.platform) throw new Error(`Release platform ${manifest.platform} does not match ${process.platform}`)
   if (manifest.arch !== process.arch) throw new Error(`Release architecture ${manifest.arch} does not match ${process.arch}`)
   if (manifest.nodeMajor !== nodeMajor) throw new Error(`Release Node.js ${manifest.nodeMajor} does not match ${nodeMajor}`)
+  if (manifest.nodeModuleVersion !== process.versions.modules) throw new Error("Release native module ABI does not match Node.js")
+  if (manifest.minNodeVersion !== process.env.MIN_NODE_VERSION) throw new Error("Unexpected minimum Node.js version")
+  const current = process.versions.node.split(".").map(Number)
+  const minimum = manifest.minNodeVersion.split(".").map(Number)
+  if (current[1] < minimum[1] || (current[1] === minimum[1] && current[2] < minimum[2])) throw new Error("Node.js is below the release minimum")
   if (!/^[0-9a-f]{40}$/.test(manifest.commit)) throw new Error("Invalid release commit")
   process.stdout.write(manifest.commit)
 ')"
-
-PM2_MAJOR=0
-if command -v pm2 >/dev/null 2>&1; then
-  PM2_ENTRY="$(readlink -f "$(command -v pm2)")"
-  PM2_PACKAGE_JSON="$(dirname "$(dirname "${PM2_ENTRY}")")/package.json"
-  if [[ -f "${PM2_PACKAGE_JSON}" ]]; then
-    PM2_MAJOR="$(PM2_PACKAGE_JSON="${PM2_PACKAGE_JSON}" node -p \
-      'require(process.env.PM2_PACKAGE_JSON).version.split(".")[0]')"
-  fi
-fi
-if [[ ! "${PM2_MAJOR}" =~ ^[0-9]+$ ]] || (( PM2_MAJOR < 6 )); then
-  npm install --global pm2@6
-fi
-
-if ! id "${AGENT_USER}" >/dev/null 2>&1; then
-  useradd --create-home --shell /usr/sbin/nologin "${AGENT_USER}"
-fi
 
 install -d -o root -g root -m 0755 "${INSTALL_ROOT}/releases"
 install -d -o root -g "${AGENT_USER}" -m 0750 "${CONFIG_ROOT}"
@@ -249,20 +244,46 @@ rsync -a --delete "${RSYNC_EXCLUDES[@]}" \
   "${RELEASE_SOURCE_DIR}/" "${RELEASE_DIR}/"
 chown -R root:root "${RELEASE_DIR}"
 chmod -R go-w "${RELEASE_DIR}"
+install -d -o root -g root -m 0755 "${RELEASE_DIR}/runtime/bin"
+ln -s "${NODE_BIN}" "${RELEASE_DIR}/runtime/bin/node"
+NODE_BIN="${NODE_BIN}" RELEASE_DIR="${RELEASE_DIR}" "${NODE_BIN}" -e '
+  const fs = require("node:fs")
+  fs.writeFileSync(`${process.env.RELEASE_DIR}/runtime/node.json`, JSON.stringify({
+    nodePath: process.env.NODE_BIN,
+    nodeVersion: process.versions.node,
+    nodeModuleVersion: process.versions.modules
+  }, null, 2) + "\n")
+'
+RELEASE_NODE="${RELEASE_DIR}/runtime/bin/node"
+PM2_CLI="${RELEASE_DIR}/node_modules/pm2/bin/pm2"
+"${RELEASE_NODE}" -e 'if (require(process.argv[1]).version !== "7.1.0") throw new Error("Unexpected bundled PM2 version")' \
+  "${RELEASE_DIR}/node_modules/pm2/package.json"
 
 (
   cd "${RELEASE_DIR}"
   runuser -u "${AGENT_USER}" -- env HOME="${AGENT_HOME}" \
-    /usr/bin/node -e "const Database = require('better-sqlite3'); new Database(':memory:').close()"
+    "${RELEASE_NODE}" -e "const Database = require('better-sqlite3'); new Database(':memory:').close()"
 )
 
 (
   cd "${RELEASE_DIR}"
   env -i PATH="${PATH}" DOTENV_CONFIG_PATH="${ENV_FILE}" \
-    /usr/bin/node -e "require('./dist/config/app-config').loadAppConfig()"
+    "${RELEASE_NODE}" -e "require('./dist/config/app-config').loadAppConfig()"
 )
 
+# Stop the old daemon too: replacing Node on disk does not update a running PM2.
+if systemctl cat pm2-eagleway-agent.service >/dev/null 2>&1; then
+  systemctl stop pm2-eagleway-agent.service
+fi
+(
+  cd "${AGENT_HOME}"
+  runuser -u "${AGENT_USER}" -- env -i HOME="${AGENT_HOME}" \
+    PM2_HOME="${AGENT_HOME}/.pm2" PATH="${RELEASE_DIR}/runtime/bin:${PATH}" \
+    "${RELEASE_NODE}" "${PM2_CLI}" kill
+)
 ln -sfn "${RELEASE_DIR}" "${INSTALL_ROOT}/current"
+install -o root -g root -m 0755 \
+  "${RELEASE_DIR}/scripts/eagleway-agent-pm2" /usr/local/bin/eagleway-agent-pm2
 install -d -o root -g root -m 0755 /usr/local/libexec
 install -o root -g root -m 0755 \
   "${RELEASE_DIR}/scripts/eagleway-node-helper" \
@@ -283,20 +304,19 @@ chmod 0600 "${CONFIG_ROOT}/state.key"
 ln -sfn "${CONFIG_ROOT}/agent.env" "${INSTALL_ROOT}/current/.env"
 
 (
-  # PM2 passes its current directory to the daemon spawn. A deployment started
-  # from /root would otherwise fail with "spawn /usr/bin/node EACCES" after
-  # dropping privileges to the service user.
+  # PM2 inherits cwd when spawning its daemon; use a service-user-accessible directory.
   cd "${AGENT_HOME}"
   runuser -u "${AGENT_USER}" -- env HOME="${AGENT_HOME}" \
-    pm2 delete eagleway-node-agent >/dev/null 2>&1 || true
-  runuser -u "${AGENT_USER}" -- env HOME="${AGENT_HOME}" \
-    pm2 start "${INSTALL_ROOT}/current/ecosystem.config.cjs"
-  runuser -u "${AGENT_USER}" -- env HOME="${AGENT_HOME}" pm2 save
+    /usr/local/bin/eagleway-agent-pm2 start "${INSTALL_ROOT}/current/ecosystem.config.cjs"
+  runuser -u "${AGENT_USER}" -- /usr/local/bin/eagleway-agent-pm2 save --force
+  runuser -u "${AGENT_USER}" -- /usr/local/bin/eagleway-agent-pm2 kill
 )
-(
-  cd /
-  pm2 startup systemd -u "${AGENT_USER}" --hp "${AGENT_HOME}" >/dev/null
-)
+install -o root -g root -m 0644 "${RELEASE_DIR}/scripts/pm2-eagleway-agent.service" \
+  /etc/systemd/system/pm2-eagleway-agent.service
+systemctl daemon-reload
+systemctl enable pm2-eagleway-agent.service
+systemctl start pm2-eagleway-agent.service
+systemctl is-active --quiet pm2-eagleway-agent.service
 
 UFW_ACTIVE=false
 FIREWALLD_ACTIVE=false
@@ -347,3 +367,4 @@ elif [[ "${FIREWALLD_ACTIVE}" == "true" ]]; then
 fi
 
 echo "Eagleway Node Agent installed in ${RELEASE_DIR}"
+echo "Runtime: Node.js ${NODE_VERSION} (${NODE_BIN}); PM2: /usr/local/bin/eagleway-agent-pm2"

@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+if [ "$(/usr/bin/id -un)" != eagleway-agent ]; then
+  echo "Run as the service user: sudo -u eagleway-agent -H eagleway-agent-pm2 $*" >&2
+  exit 1
+fi
+
+release=/opt/eagleway-node-agent/current
+exec /usr/bin/env -i \
+  HOME=/home/eagleway-agent USER=eagleway-agent LOGNAME=eagleway-agent \
+  PM2_HOME=/home/eagleway-agent/.pm2 \
+  PATH="${release}/runtime/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+  "${release}/runtime/bin/node" "${release}/node_modules/pm2/bin/pm2" "$@"
