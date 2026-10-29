@@ -26,3 +26,4 @@ jobs:
       - run: bash -n scripts/*.sh
       - run: sh -n scripts/eagleway-agent-pm2 scripts/eagleway-node-helper
       - run: pnpm verify
+      - run: bash scripts/test-xray-runtime.sh

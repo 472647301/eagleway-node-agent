@@ -54,6 +54,8 @@ Agent 不是中心数据库的副本。中心服务始终是节点配置、用�
 
 0.2.1 一并更新 Node.js 运行时及 compression、gRPC、proxy-addr、Multer、js-yaml 的安全依赖版本。CI 和发布流水线执行 `pnpm audit --prod`；具体锁定版本与验证边界见[上线验收](docs/release-acceptance.md)。
 
+0.2.2 升级 Xray-core 至 v26.10.29，并定向更新 body-parser、Multer、qs 的受影响间接依赖版本，以通过当前发布审计。
+
 用户 credential、证书私钥、完整连接配置和命令参数不得写入普通日志。`assignmentId` 是非秘密的稳定业务标识。
 
 ## 本地开发
@@ -67,6 +69,8 @@ pnpm verify
 
 开发和 CI 使用 `.node-version` 指定的 Node.js 22.23.4；nvm 用户可先执行 `nvm install 22.23.4 && nvm use 22.23.4`。
 
+Linux x64/arm64 在构建后运行 `bash scripts/test-xray-runtime.sh`，下载并校验固定核心，执行三协议真实核心集成测试。其他平台可自行校验对应官方 v26.10.29 核心后，使用 `XRAY_TEST_BINARY=/绝对路径/xray pnpm test:xray`。测试需要 OpenSSL 和本机 loopback 监听权限，不依赖 systemd 或生产证书；VPS 验收另按操作手册执行。
+
 ## 发布新版本
 
 版本代码合并到 `main` 并确认工作区干净后，创建并推送一个新的 `v*` tag：
@@ -77,8 +81,8 @@ git pull --ff-only
 pnpm verify
 git status --short
 git push origin main
-git tag -a v0.2.1 -m "release: v0.2.1"
-git push origin v0.2.1
+git tag -a v0.2.2 -m "release: v0.2.2"
+git push origin v0.2.2
 ```
 
 `git status --short` 应无输出。tag 推送后可在 [Release workflow](https://github.com/472647301/eagleway-node-agent/actions/workflows/release.yml) 查看构建进度；成功后产物会发布到 [GitHub Releases](https://github.com/472647301/eagleway-node-agent/releases)。已经发布的 tag 不要强制覆盖，修复后创建新的递增版本 tag。
@@ -95,7 +99,7 @@ git push origin v0.2.1
 Release workflow 完成后，在 VPS 上只需下载同一个 tag 中的部署脚本并运行：
 
 ```bash
-TAG=v0.2.1
+TAG=v0.2.2
 curl -fsSL "https://raw.githubusercontent.com/472647301/eagleway-node-agent/${TAG}/scripts/deploy-ubuntu-release.sh" -o /tmp/eagleway-deploy.sh
 bash /tmp/eagleway-deploy.sh "${TAG}"
 ```
@@ -103,7 +107,7 @@ bash /tmp/eagleway-deploy.sh "${TAG}"
 脚本会自动识别 x64/arm64、下载 release 和校验文件、验证 SHA-256、解压并调用 Bootstrap。文件名为兼容旧版本仍保留 `ubuntu`，但脚本会读取 `/etc/os-release` 并支持 Ubuntu 与 Alibaba Cloud Linux 3。首次运行会创建 `~/.config/eagleway-node-agent/agent.env` 并打开编辑器；至少填写 `NODE_ID`、`ALLOWED_CIDRS` 和 `REPORTING_ENABLED`。服务器带宽由中心 API 自行维护，不需要写入 Agent 配置。后续升级只需：
 
 ```bash
-bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.2.1
+bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.2.2
 ```
 
 部署后常用检查：
@@ -148,7 +152,7 @@ sudo bash /opt/eagleway-node-agent/current/scripts/uninstall-ubuntu.sh
 
 脚本执行前要求输入 `uninstall` 确认。自动化执行可加 `--yes`；需要保留 `/etc/eagleway-node-agent`、SQLite 状态、日志和服务用户时可加 `--keep-data`。脚本会保留共享的 Node.js、PM2、Nginx、Certbot、证书和非 Eagleway 网站。卸载前应先在中心停止控制请求和用户分配，卸载后还需从中心注销节点并检查云安全组规则。
 
-安装协议时，受限 helper 会根据 VPS 架构直接下载源码中固定的 XTLS 官方 GitHub Release（当前为稳定版 `v26.3.27`），并使用源码内固定的 SHA-256 校验后再安装。控制请求和环境变量都不能改变下载地址、版本或校验值；升级 Xray-core 需要发布新版 Agent。
+安装协议时，受限 helper 会根据 VPS 架构直接下载源码中固定的 XTLS 官方 GitHub Release（当前为稳定版 `v26.10.29`），并使用源码内固定的 SHA-256 校验后再安装。控制请求和环境变量都不能改变下载地址、版本或校验值；0.2.2 将核心更新为 v26.10.29。部署新版 Agent 不会自动替换已安装的核心，重复 install 和 config/apply 也不会升级二进制；存量节点按[核心升级与回滚](docs/xray-core-upgrade.md)在维护窗口操作。
 
 ## 当前验收状态
 

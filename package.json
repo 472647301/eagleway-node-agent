@@ -1,6 +1,6 @@
 {
   "name": "@eagleway/node-agent",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Eagleway managed network node agent",
   "private": true,
   "license": "UNLICENSED",
@@ -28,6 +28,7 @@
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "test": "node --test -r ts-node/register -r tsconfig-paths/register test/*.spec.ts",
+    "test:xray": "node --test -r ts-node/register -r tsconfig-paths/register test/integration/xray-runtime.spec.ts",
     "typecheck": "tsc --noEmit",
     "verify": "pnpm format:check && pnpm typecheck && pnpm test && pnpm build"
   },

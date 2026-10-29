@@ -32,6 +32,8 @@ import {
   certbotXrayDeployHook
 } from './host/certificate-renewal'
 import { downloadVerifiedArtifact } from './host/artifact-downloader'
+import { xrayArtifact, xrayRelease } from './host/xray-release'
+import { xrayConfig } from './protocols/xray/runtime-config'
 import {
   BAOTA_NGINX_BINARY,
   BAOTA_NGINX_VHOST_DIRECTORY,
@@ -74,19 +76,6 @@ const runtimeLogPaths = [
 ]
 const runtimeArtifactDownloadTimeoutMs = 10 * 60 * 1000
 const runtimeArtifactMaxBytes = 128 * 1024 * 1024
-const xrayRelease = {
-  version: 'v26.3.27',
-  assets: {
-    x64: {
-      fileName: 'Xray-linux-64.zip',
-      sha256: '23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae'
-    },
-    arm64: {
-      fileName: 'Xray-linux-arm64-v8a.zip',
-      sha256: '4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c'
-    }
-  }
-} as const
 
 type InstallPlan = {
   schemaVersion: 1
@@ -574,64 +563,6 @@ ${upstream}
   }
 }
 `
-}
-
-function xrayConfig(
-  plan: InstallPlan,
-  certificate: { cert: string; key: string }
-) {
-  const settings: Record<string, unknown> =
-    plan.protocol === 'trojan'
-      ? { users: [], fallbacks: [{ dest: 80 }] }
-      : plan.protocol === 'vless'
-        ? { clients: [], decryption: 'none', fallbacks: [{ dest: 80 }] }
-        : { clients: [] }
-  return {
-    log: {
-      access: runtimeLogPaths[0],
-      error: runtimeLogPaths[1],
-      loglevel: 'warning'
-    },
-    api: {
-      tag: 'api',
-      listen: plan.apiAddress,
-      services: ['HandlerService', 'StatsService']
-    },
-    stats: {},
-    policy: {
-      levels: {
-        '0': {
-          statsUserUplink: true,
-          statsUserDownlink: true,
-          statsUserOnline: true
-        }
-      }
-    },
-    inbounds: [
-      {
-        tag: `eagleway-${plan.protocol}`,
-        listen: '::',
-        port: plan.port,
-        protocol: plan.protocol,
-        settings,
-        streamSettings: {
-          network: 'tcp',
-          security: 'tls',
-          tlsSettings: {
-            serverName: plan.domain,
-            alpn: ['http/1.1'],
-            certificates: [
-              {
-                certificateFile: certificate.cert,
-                keyFile: certificate.key
-              }
-            ]
-          }
-        }
-      }
-    ],
-    outbounds: [{ tag: 'direct', protocol: 'freedom' }]
-  }
 }
 
 function systemdUnit(): string {
@@ -1254,15 +1185,6 @@ function validateProxyUrl(value: unknown): void {
     /[\s{};]/.test(value)
   )
     fail('Proxy URL is invalid')
-}
-
-function xrayArtifact(architecture: InstallPlan['architecture']) {
-  const asset = xrayRelease.assets[architecture]
-  return {
-    url: `https://github.com/XTLS/Xray-core/releases/download/${xrayRelease.version}/${asset.fileName}`,
-    sha256: asset.sha256,
-    cacheName: `xray-${xrayRelease.version}-${architecture}-${asset.sha256}.zip`
-  }
 }
 
 function assertManagedResourceBoundary(): void {

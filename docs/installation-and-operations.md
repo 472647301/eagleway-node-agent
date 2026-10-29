@@ -1,6 +1,6 @@
 # 当前安装与运维边界
 
-核对日期：2026-10-22。可执行步骤见[操作手册](operations-runbook.md)，本页说明当前脚本能做什么和需要人工完成什么。
+核对日期：2026-10-29。可执行步骤见[操作手册](operations-runbook.md)，本页说明当前脚本能做什么和需要人工完成什么。
 
 ## 发布与 Bootstrap
 
@@ -20,7 +20,7 @@ PM2 7.1.0 是发布包的生产依赖，服务器不再安装全局 PM2/npm。ma
 
 ## 协议安装与配置
 
-Agent install/config/apply 操作调用固定 helper；Xray 官方 artifact 版本和 SHA-256 固定在 `src/helper.ts`，当前为 v26.3.27，不能通过控制请求或环境变量更改。升级 Xray 需要发布新的 Agent 并按当前运行状态重新安装/应用配置及验证。
+Agent install/config/apply 操作调用固定 helper；Xray 官方 artifact 版本和 SHA-256 固定在 `src/host/xray-release.ts`，由 helper 引用；0.2.2 固定为 v26.10.29，不能通过控制请求或环境变量更改。部署新版 Agent 不会自动替换已安装的核心；相同配置的 install 直接返回，config/apply 只更新配置。存量节点按[核心升级与回滚](xray-core-upgrade.md)在维护窗口替换并验证，中心 API 契约不变。
 
 Ubuntu、Alibaba Cloud Linux 3 及其宝塔 Nginx 环境支持复用现有证书；宝塔缺少证书时使用现有目标站点 WebRoot，或创建带所有权标记的 ACME vhost 后签发。Alibaba Cloud Linux 3 使用 EPEL Certbot；空白系统的标准 Nginx 来自带 GPG 校验的 nginx.org CentOS 8 仓库。Certbot 续期 hook 仅在证书被当前配置引用时重启运行时；宝塔自行续期后按手册核验并重启。
 

@@ -2,7 +2,7 @@
 
 状态：当前操作手册
 
-核对日期：2026-10-22
+核对日期：2026-10-29
 
 本文面向负责 Eagleway Network 节点服务器的基础运维人员，描述当前版本可以实际执行的部署、验证、升级、回滚和故障定位流程。接口字段说明见[当前节点契约](node-api-contract.md)，变更时同时核对 Controller/DTO/Service。上线证据见[当前验收清单](release-acceptance.md)，未勾选不代表已完成。
 
@@ -154,8 +154,8 @@ git pull --ff-only
 pnpm verify
 git status --short
 git push origin main
-git tag -a v0.2.1 -m "release: v0.2.1"
-git push origin v0.2.1
+git tag -a v0.2.2 -m "release: v0.2.2"
+git push origin v0.2.2
 ~~~
 
 `git status --short` 应无输出。推送 `v*` tag 后，在以下地址查看构建进度：
@@ -163,7 +163,7 @@ git push origin v0.2.1
 - https://github.com/472647301/eagleway-node-agent/actions/workflows/release.yml
 - https://github.com/472647301/eagleway-node-agent/releases
 
-不要移动或强制覆盖已经发布的 tag。发布内容需要修正时，提交修复并创建新的递增版本 tag，例如 `v0.2.1`。
+不要移动或强制覆盖已经发布的 tag。发布内容需要修正时，提交修复并创建新的递增版本 tag，例如 `v0.2.2`。
 
 ### 5.2 VPS 首次部署
 
@@ -172,7 +172,7 @@ Release workflow 在 Linux x64/arm64 runner 上构建对应架构的生产发布
 等待 GitHub Release 中出现 x64 和 arm64 产物后，在 VPS 执行：
 
 ~~~bash
-TAG=v0.2.1
+TAG=v0.2.2
 curl -fsSL "https://raw.githubusercontent.com/472647301/eagleway-node-agent/${TAG}/scripts/deploy-ubuntu-release.sh" -o /tmp/eagleway-deploy.sh
 bash /tmp/eagleway-deploy.sh "${TAG}"
 ~~~
@@ -559,7 +559,7 @@ printf '%s\n' "$BACKUP_DIR"
 公开仓库无需 deploy key、源码 checkout、pnpm 或开发依赖。确认对应 tag 的 Release workflow 成功后执行：
 
 ~~~bash
-bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.2.1
+bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.2.2
 ~~~
 
 脚本会自动选择本机架构并验证 SHA-256。需要部署指定配置文件时，将其作为第二个参数传入。
@@ -597,7 +597,13 @@ sudo systemctl is-active eagleway-xray.service
 
 历史 release 不会自动删除。至少保留当前和上一个已验证版本，确认稳定后再按明确路径人工清理更旧版本。
 
+### 9.6 Xray-core 升级
+
+0.2.2 固定安装 Xray-core v26.10.29。第 9.3–9.5 节只部署和验证 Agent，不会替换已有的 `/usr/local/bin/xray`；重复 install 和 config/apply 也不会升级核心。存量节点另按[核心升级与回滚](xray-core-upgrade.md)操作，包含官方包校验、候选配置验证、备份、二进制替换、用户恢复及独立回滚。
+
 ## 10. 人工回滚
+
+本节只回滚 Agent，不会恢复 Xray 二进制；核心回滚见[核心升级与回滚](xray-core-upgrade.md)。
 
 仅当旧代码兼容当前 SQLite schema 时执行。若新版本执行了不可逆数据库迁移，必须按该版本的迁移说明处理。以下命令仅适用于具有 `runtime/bin/node`、新版 helper 与随包 PM2 的新格式 release。0.2.0 及之前的 release 会恢复对 `/usr/bin/node` 的依赖，需先用安全运行时重新打包验证，不直接切回旧格式。
 
