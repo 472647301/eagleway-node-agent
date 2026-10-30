@@ -36,7 +36,7 @@ NestJS common/core/platform-express/testing 统一到 11.2.7，带入 Multer 2.4
 
 2026-10-29 本机 macOS arm64、Node.js 22.23.4、pnpm 11.22.0 验证通过：`pnpm verify`（59 项通过、1 项 Linux 权限用例跳过）、三协议真实 v26.10.29 核心集成测试、Shell 语法及文档命令语法检查。另对比确认配置生成器提取前后三协议默认 JSON 完全一致，编译后的两架构校验值与实际下载包一致。核心测试使用临时自签证书及固定证书指纹，只绑定本机端口，不操作生产目录。
 
-核心在线统计主动排除来源 `127.0.0.1`，因此 macOS 测试验证该来源的在线列表为空；Linux 测试用 `127.0.0.2` 来源验证非零在线人数。新版默认禁止三协议代理访问私网，测试仅放行精确本机目标；生产保持核心默认策略，迁移影响见升级手册。
+核心在线统计主动排除来源 `127.0.0.1`，因此 macOS 测试验证该来源的在线列表为空；Linux 测试用 `127.0.0.2` 来源验证非零在线人数。新版默认禁止三协议代理访问私网，测试仅放行精确本机目标；生产保持核心默认策略，使用代理访问私网目标的节点须在升级前验证业务兼容性。
 
 同日发布审计发现已有锁定依赖的 3 项公告（2 high、1 moderate），通过 `pnpm-workspace.yaml` 的受影响版本范围 override 定向修复，锁文件仅变更以下三个依赖，修复后 `pnpm audit --prod` 为 0 项已知告警：
 
@@ -46,7 +46,7 @@ NestJS common/core/platform-express/testing 统一到 11.2.7，带入 Multer 2.4
 | multer | 2.4.0 | 2.5.0 | [GHSA-q7qp-rjg7-q26m](https://github.com/advisories/GHSA-q7qp-rjg7-q26m) |
 | qs | 6.16.0 | 6.16.1 | [GHSA-6pq8-jhm2-2vcw](https://github.com/advisories/GHSA-6pq8-jhm2-2vcw) |
 
-本轮 Linux CI、systemd、runtimeEpoch 与 VPS 灰度结果尚待实测，不能用 macOS 的运行结果替代。存量节点维护步骤见[核心升级与回滚](xray-core-upgrade.md)。
+本轮 Linux CI、systemd、runtimeEpoch 与 VPS 灰度结果尚待实测，不能用 macOS 的运行结果替代。存量节点通过中心 API 卸载重装升级核心，步骤见[操作手册第 9.6 节](operations-runbook.md#96-xray-core-升级)。
 
 ## 当前发布待实测
 
@@ -56,7 +56,7 @@ NestJS common/core/platform-express/testing 统一到 11.2.7，带入 Multer 2.4
 - [ ] 在普通 Ubuntu、Ubuntu 宝塔 Nginx、Alibaba Cloud Linux 3 x64 与其宝塔 Nginx 环境验证首次 Bootstrap、独立 env、权限、helper 和 PM2 自启动。
 - [ ] 在 Alibaba Cloud Linux 3 的 `5.10.134-17.2.al8` 与 `5.10.134-19.1.al8` 节点验证 DNF、Node.js 22、EPEL Certbot、标准/宝塔 Nginx、`better-sqlite3` 和 firewalld inactive/active 两种路径。
 - [ ] 核验 ALLOWED_CIDRS、可信 loopback 代理、云安全组及主机防火墙；非允许来源被拒绝。
-- [ ] 在 Linux x64/arm64 通过真实 v26.10.29 核心集成测试，并核对新装及存量节点的 runtimeVersion；演练核心替换失败后的独立回滚。
+- [ ] 在 Linux x64/arm64 通过真实 v26.10.29 核心集成测试，并核对新装及存量节点的 runtimeVersion；验证中心 API 卸载、重装、同步用户的升级流程及失败恢复。
 - [ ] 三协议分别验证安装、证书获取/复用、start/stop、状态、日志、卸载/重复卸载及重装。
 - [ ] 验证配置应用、修订幂等/冲突、失败恢复及中心生效配置收敛。
 - [ ] 验证用户全量/增量、凭据更换、删除不存在用户和空数组清空全部用户。

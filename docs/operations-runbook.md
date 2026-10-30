@@ -599,11 +599,20 @@ sudo systemctl is-active eagleway-xray.service
 
 ### 9.6 Xray-core 升级
 
-0.2.2 固定安装 Xray-core v26.10.29。第 9.3–9.5 节只部署和验证 Agent，不会替换已有的 `/usr/local/bin/xray`；重复 install 和 config/apply 也不会升级核心。存量节点另按[核心升级与回滚](xray-core-upgrade.md)操作，包含官方包校验、候选配置验证、备份、二进制替换、用户恢复及独立回滚。
+0.2.2 固定安装 Xray-core v26.10.29。存量节点先按第 9.3–9.5 节部署新版 Agent，再在维护窗口通过中心 API 卸载协议、重新安装并全量同步用户。仅部署 Agent、重复 install 或 config/apply 都不会升级已安装的核心。
+
+维护期间保持节点启用、中心后台任务正常运行，避免并发控制和用户分配变更；先部署中心的 runtimeEpoch 流量基线修复。以下请求使用中心已有管理员鉴权，安装配置及用户凭据由中心从数据库读取。
+
+1. 调用 `POST /api/v1/manage/nodes/:nodeId/control/uninstall`。等待 Agent 无活动操作、状态为 `not_installed`，且中心节点详情中的 `status` 也变为 `not_installed`；只收到 HTTP 202 不代表卸载完成。
+2. 调用 `POST /api/v1/manage/nodes/:nodeId/control/install`。等待安装完成，确认状态为 `online`、无活动操作，且 `runtimeVersion` 包含目标核心版本。
+3. 调用 `POST /api/v1/manage/nodes/:nodeId/control/users/sync`。确认全量用户同步成功、`requiresUserSync=false`。
+4. 验证用户连接和中心流量入账；原先停止的节点在验证后通过中心 stop 恢复停止状态。
+
+通过 `GET /api/v1/manage/nodes/:nodeId/control/status` 查询 Agent 实际状态，通过 `GET /api/v1/manage/nodes/:nodeId` 查询中心保存的节点状态。卸载重装会中断代理连接，并保留中心的节点配置、用户分配、原凭据和历史流量；失败时修复原因后重试对应步骤。
 
 ## 10. 人工回滚
 
-本节只回滚 Agent，不会恢复 Xray 二进制；核心回滚见[核心升级与回滚](xray-core-upgrade.md)。
+本节回滚 Agent release。需要回退 Xray-core 时，部署固定目标核心版本的 Agent，再按第 9.6 节通过中心 API 卸载、重新安装并同步用户。
 
 仅当旧代码兼容当前 SQLite schema 时执行。若新版本执行了不可逆数据库迁移，必须按该版本的迁移说明处理。以下命令仅适用于具有 `runtime/bin/node`、新版 helper 与随包 PM2 的新格式 release。0.2.0 及之前的 release 会恢复对 `/usr/bin/node` 的依赖，需先用安全运行时重新打包验证，不直接切回旧格式。
 

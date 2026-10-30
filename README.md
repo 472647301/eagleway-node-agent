@@ -152,7 +152,7 @@ sudo bash /opt/eagleway-node-agent/current/scripts/uninstall-ubuntu.sh
 
 脚本执行前要求输入 `uninstall` 确认。自动化执行可加 `--yes`；需要保留 `/etc/eagleway-node-agent`、SQLite 状态、日志和服务用户时可加 `--keep-data`。脚本会保留共享的 Node.js、PM2、Nginx、Certbot、证书和非 Eagleway 网站。卸载前应先在中心停止控制请求和用户分配，卸载后还需从中心注销节点并检查云安全组规则。
 
-安装协议时，受限 helper 会根据 VPS 架构直接下载源码中固定的 XTLS 官方 GitHub Release（当前为稳定版 `v26.10.29`），并使用源码内固定的 SHA-256 校验后再安装。控制请求和环境变量都不能改变下载地址、版本或校验值；0.2.2 将核心更新为 v26.10.29。部署新版 Agent 不会自动替换已安装的核心，重复 install 和 config/apply 也不会升级二进制；存量节点按[核心升级与回滚](docs/xray-core-upgrade.md)在维护窗口操作。
+安装协议时，受限 helper 会根据 VPS 架构直接下载源码中固定的 XTLS 官方 GitHub Release（当前为稳定版 `v26.10.29`），并使用源码内固定的 SHA-256 校验后再安装。控制请求和环境变量都不能改变下载地址、版本或校验值；0.2.2 将核心更新为 v26.10.29。部署新版 Agent 不会自动替换已安装的核心，重复 install 和 config/apply 也不会升级二进制；存量节点在维护窗口通过中心 API 卸载协议、重新安装并全量同步用户，步骤见[操作手册第 9.6 节](docs/operations-runbook.md#96-xray-core-升级)。
 
 ## 当前验收状态
 
