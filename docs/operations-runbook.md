@@ -2,7 +2,7 @@
 
 状态：当前操作手册
 
-核对日期：2026-10-29
+核对日期：2026-11-01
 
 本文面向负责 Eagleway Network 节点服务器的基础运维人员，描述当前版本可以实际执行的部署、验证、升级、回滚和故障定位流程。接口字段说明见[当前节点契约](node-api-contract.md)，变更时同时核对 Controller/DTO/Service。上线证据见[当前验收清单](release-acceptance.md)，未勾选不代表已完成。
 
@@ -154,8 +154,8 @@ git pull --ff-only
 pnpm verify
 git status --short
 git push origin main
-git tag -a v0.2.2 -m "release: v0.2.2"
-git push origin v0.2.2
+git tag -a v0.2.3 -m "release: v0.2.3"
+git push origin v0.2.3
 ~~~
 
 `git status --short` 应无输出。推送 `v*` tag 后，在以下地址查看构建进度：
@@ -163,7 +163,7 @@ git push origin v0.2.2
 - https://github.com/472647301/eagleway-node-agent/actions/workflows/release.yml
 - https://github.com/472647301/eagleway-node-agent/releases
 
-不要移动或强制覆盖已经发布的 tag。发布内容需要修正时，提交修复并创建新的递增版本 tag，例如 `v0.2.2`。
+不要移动或强制覆盖已经发布的 tag。发布内容需要修正时，提交修复并创建新的递增版本 tag，例如从 `v0.2.3` 递增到 `v0.2.4`。
 
 ### 5.2 VPS 首次部署
 
@@ -172,7 +172,7 @@ Release workflow 在 Linux x64/arm64 runner 上构建对应架构的生产发布
 等待 GitHub Release 中出现 x64 和 arm64 产物后，在 VPS 执行：
 
 ~~~bash
-TAG=v0.2.2
+TAG=v0.2.3
 curl -fsSL "https://raw.githubusercontent.com/472647301/eagleway-node-agent/${TAG}/scripts/deploy-ubuntu-release.sh" -o /tmp/eagleway-deploy.sh
 bash /tmp/eagleway-deploy.sh "${TAG}"
 ~~~
@@ -559,7 +559,7 @@ printf '%s\n' "$BACKUP_DIR"
 公开仓库无需 deploy key、源码 checkout、pnpm 或开发依赖。确认对应 tag 的 Release workflow 成功后执行：
 
 ~~~bash
-bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.2.2
+bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.2.3
 ~~~
 
 脚本会自动选择本机架构并验证 SHA-256。需要部署指定配置文件时，将其作为第二个参数传入。
@@ -599,7 +599,7 @@ sudo systemctl is-active eagleway-xray.service
 
 ### 9.6 Xray-core 升级
 
-0.2.2 固定安装 Xray-core v26.10.29。存量节点先按第 9.3–9.5 节部署新版 Agent，再在维护窗口通过中心 API 卸载协议、重新安装并全量同步用户。仅部署 Agent、重复 install 或 config/apply 都不会升级已安装的核心。
+0.2.3 固定安装 Xray-core v26.10.31。存量节点先按第 9.3–9.5 节部署新版 Agent，再在维护窗口通过中心 API 卸载协议、重新安装并全量同步用户。仅部署 Agent、重复 install 或 config/apply 都不会升级已安装的核心。
 
 维护期间保持节点启用、中心后台任务正常运行，避免并发控制和用户分配变更；先部署中心的 runtimeEpoch 流量基线修复。以下请求使用中心已有管理员鉴权，安装配置及用户凭据由中心从数据库读取。
 

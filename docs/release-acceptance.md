@@ -1,6 +1,6 @@
 # 当前 Agent 上线验收
 
-更新日期：2026-10-29。当前源码包版本见 `package.json`（0.2.2）；以实际发布的 commit、tag 和 release-manifest 为验收对象。本轮代码修改没有执行 VPS 灰度，也没有发布 release。
+更新日期：2026-11-01。当前源码包版本见 `package.json`（0.2.3）；以实际发布的 commit、tag 和 release-manifest 为验收对象。本轮代码修改没有执行 VPS 灰度，也没有发布 release。
 
 ## 本地与 CI 入口
 
@@ -26,9 +26,19 @@ NestJS common/core/platform-express/testing 统一到 11.2.7，带入 Multer 2.4
 
 已按 CI 参数在本机组装生产包，核验上述实际依赖版本、SQLite 原生模块加载、无开发依赖及 `.env`、无绝对符号链接，并在私有临时目录启动打包后的 Agent，健康与状态接口均通过。该验证基于 macOS，Linux x64/arm64 构建及 VPS 生命周期验收仍按下列清单执行。
 
-## Xray-core 26.10.29 升级
+## Xray-core 26.10.31 升级
 
-0.2.2 将固定核心从 v26.3.27 更新为 v26.10.29，两个 Linux 架构沿用原官方附件名。已下载 Linux x64/arm64 和本机测试用 macOS arm64 安装包，分别计算 SHA-256，与官方 Release 元数据及 `.dgst` 文件交叉验证一致。固定值见 `src/host/xray-release.ts`。
+0.2.3 将固定核心从 v26.10.29 更新为 [v26.10.31](https://github.com/XTLS/Xray-core/releases/tag/v26.10.31)。官方将其标记为默认关闭 MPTCP 的紧急安全更新，并撤下 v26.10.29。核心升级采用该默认行为，生产配置不显式启用 MPTCP。旧版本验证记录仅供追溯。
+
+2026-11-01 已下载官方 Linux x64、Linux arm64 和本机测试用 macOS arm64 包，分别计算 SHA-256，与官方 Release API 的 digest 及 `.dgst` 文件交叉核验一致。两个 Linux 架构沿用原附件名，固定值更新在 `src/host/xray-release.ts`；helper 和 Linux 集成测试下载脚本共同使用该定义。
+
+本机 macOS arm64、Node.js 22.23.4、pnpm 11.22.0 的 `pnpm verify` 通过（59 项通过、1 项 Linux 权限用例跳过）；三协议真实 v26.10.31 核心集成测试全部通过，覆盖配置校验、gRPC 用户管理、TLS 代理流量、上下行统计和重启后的用户恢复。macOS 仅验证 loopback 在线列表为空，Linux 非零在线计数、systemd、runtimeEpoch 与 VPS 灰度仍待 CI 和服务器实测。
+
+同日发布审计发现 PM2 间接依赖 follow-redirects 1.16.1 命中高危公告 [GHSA-mrwp-f3q8-3g9p](https://github.com/advisories/GHSA-mrwp-f3q8-3g9p)。通过受影响版本范围 override 定向更新至 1.16.2，锁文件仅升级该包；冻结锁文件安装后确认 PM2 依赖链实际加载修复版，`pnpm audit --prod` 报告 0 项已知告警。
+
+## Xray-core 26.10.29 升级记录（0.2.2，已被替代）
+
+0.2.2 将固定核心从 v26.3.27 更新为 v26.10.29，两个 Linux 架构沿用原官方附件名。当时已下载 Linux x64/arm64 和本机测试用 macOS arm64 安装包，分别计算 SHA-256，与官方 Release 元数据及 `.dgst` 文件交叉验证一致。
 
 已对比两个 tag 的 HandlerService、StatsService、User、TypedMessage 与三协议 Account protobuf；现用 RPC 和字段保持兼容，StatsService 新增的 GetUsersStats 不在本次接入范围。中心与节点 API 契约保持不变。
 
@@ -56,7 +66,7 @@ NestJS common/core/platform-express/testing 统一到 11.2.7，带入 Multer 2.4
 - [ ] 在普通 Ubuntu、Ubuntu 宝塔 Nginx、Alibaba Cloud Linux 3 x64 与其宝塔 Nginx 环境验证首次 Bootstrap、独立 env、权限、helper 和 PM2 自启动。
 - [ ] 在 Alibaba Cloud Linux 3 的 `5.10.134-17.2.al8` 与 `5.10.134-19.1.al8` 节点验证 DNF、Node.js 22、EPEL Certbot、标准/宝塔 Nginx、`better-sqlite3` 和 firewalld inactive/active 两种路径。
 - [ ] 核验 ALLOWED_CIDRS、可信 loopback 代理、云安全组及主机防火墙；非允许来源被拒绝。
-- [ ] 在 Linux x64/arm64 通过真实 v26.10.29 核心集成测试，并核对新装及存量节点的 runtimeVersion；验证中心 API 卸载、重装、同步用户的升级流程及失败恢复。
+- [ ] 在 Linux x64/arm64 通过真实 v26.10.31 核心集成测试，并核对新装及存量节点的 runtimeVersion；验证中心 API 卸载、重装、同步用户的升级流程及失败恢复。
 - [ ] 三协议分别验证安装、证书获取/复用、start/stop、状态、日志、卸载/重复卸载及重装。
 - [ ] 验证配置应用、修订幂等/冲突、失败恢复及中心生效配置收敛。
 - [ ] 验证用户全量/增量、凭据更换、删除不存在用户和空数组清空全部用户。

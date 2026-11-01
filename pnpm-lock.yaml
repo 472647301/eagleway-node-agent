@@ -9,6 +9,7 @@ overrides:
   body-parser@>=2.0.0 <2.4.0: 2.4.0
   multer@>=2.0.0 <2.5.0: 2.5.0
   qs@>=6.7.0 <=6.16.0: 6.16.1
+  follow-redirects@>=1.16.0 <=1.16.1: 1.16.2
 
 importers:
 
@@ -1140,8 +1141,8 @@ packages:
     resolution: {integrity: sha512-S8KoZgRZN+a5rNwqTxlZZePjT/4cnm0ROV70LedRHZ0p8u9fRID0hJUZQpkKLzro8LfmC8sx23bY6tVNxv8pQA==}
     engines: {node: '>= 18.0.0'}
 
-  follow-redirects@1.16.1:
-    resolution: {integrity: sha512-FNvFGzoMLWmE6Yj9spb/zjd7yiNCHiAW9/Tg9CXrQ8wuu32HtlJOwWO11OJafl5FfY3DxTdQ0vj42zU1kvv5jg==}
+  follow-redirects@1.16.2:
+    resolution: {integrity: sha512-/kVP2U8z596Ia0gwFrwyIeo74ta5aVmSeU1FfAUMAmcEP5EP7zydmag3SLiN64NaRKef3lxsq7i/g7ltJQDGow==}
     engines: {node: '>=4.0'}
     peerDependencies:
       debug: '*'
@@ -3120,7 +3121,7 @@ snapshots:
 
   extrareqp2@1.0.0(debug@4.3.7(supports-color@8.1.1)):
     dependencies:
-      follow-redirects: 1.16.1(debug@4.3.7(supports-color@8.1.1))
+      follow-redirects: 1.16.2(debug@4.3.7(supports-color@8.1.1))
     transitivePeerDependencies:
       - debug
 
@@ -3156,7 +3157,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  follow-redirects@1.16.1(debug@4.3.7(supports-color@8.1.1)):
+  follow-redirects@1.16.2(debug@4.3.7(supports-color@8.1.1)):
     optionalDependencies:
       debug: 4.3.7(supports-color@8.1.1)
 
