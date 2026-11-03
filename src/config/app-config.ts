@@ -15,6 +15,8 @@ export interface AppConfig {
   stateDir: string
   stateKeyPath: string
   logDir: string
+  xrayLogTimezone: string
+  xrayLogRetentionDays: number
   xrayBinary: string
   xrayApiAddress: string
   acmeEmail: string | null
@@ -74,6 +76,14 @@ export function loadAppConfig(env = process.env): AppConfig {
           ? '/var/log/eagleway-node-agent'
           : './var/logs')
     ),
+    xrayLogTimezone: timeZone(env.XRAY_LOG_TIMEZONE),
+    xrayLogRetentionDays: boundedInteger(
+      env.XRAY_LOG_RETENTION_DAYS,
+      7,
+      1,
+      3650,
+      'XRAY_LOG_RETENTION_DAYS'
+    ),
     xrayBinary: env.XRAY_BINARY?.trim() || '/usr/local/bin/xray',
     xrayApiAddress: xrayApiAddress(env.XRAY_API_ADDRESS),
     acmeEmail: env.ACME_EMAIL?.trim() || null,
@@ -88,6 +98,16 @@ export function loadAppConfig(env = process.env): AppConfig {
       'OPERATION_TIMEOUT_SECONDS'
     )
   }
+}
+
+function timeZone(value: string | undefined): string {
+  const zone = value?.trim() || 'Asia/Shanghai'
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: zone }).format()
+  } catch {
+    throw new Error('XRAY_LOG_TIMEZONE must be a valid time zone')
+  }
+  return zone
 }
 
 function positiveInteger(value: string | undefined, name: string): number {

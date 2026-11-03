@@ -302,6 +302,10 @@ Agent 不返回 offline。中心请求超时或连接失败时，由中心将节
 
 仅返回允许目录中的 `.log` 文件 basename，不返回绝对路径。
 
+Xray 当前日志为 `xray-access.log`、`xray-error.log`，日期归档为 `xray-access-YYYY-MM-DD.log`、`xray-error-YYYY-MM-DD.log`，同名冲突时追加 `-1` 等编号再以 `.log` 结尾。归档不压缩，可通过下述分页接口直接读取。隐藏的轮转 `.tmp` 文件不返回、不可读取。
+
+Agent 每天 00:00 轮转，启动时检查补偿，失败时延迟一分钟重试。默认按 `Asia/Shanghai` 切日，归档归属日期为执行轮转时的前一天；停机跨天的混合日志只归档一次，日期不代表严格的逐行时间范围。默认保留最近 7 个已结束日期，可通过 `XRAY_LOG_TIMEZONE`、`XRAY_LOG_RETENTION_DAYS` 调整；首次启用会将已有非空 Xray 日志按前一天归档。
+
 ### 分页读取
 
 `POST /api/log/pages`

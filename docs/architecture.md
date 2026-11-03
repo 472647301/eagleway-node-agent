@@ -1,6 +1,6 @@
 # 当前 Node Agent 架构
 
-核对日期：2026-10-17。当前包版本为 0.2.0（发布时重新读取 `package.json`）。本文是源码说明，服务器部署证据见[上线验收](release-acceptance.md)。
+核对日期：2026-11-03。当前包版本为 0.2.4（发布时重新读取 `package.json`）。本文是源码说明，服务器部署证据见[上线验收](release-acceptance.md)。
 
 ## 实际模块
 
@@ -16,7 +16,7 @@ src/
 ├─ host/                        Linux/宝塔探测、受限 helper、Nginx/证书/防火墙
 ├─ reporting/                   定期流量上报
 ├─ state/                       SQLite、凭据加密和状态存储
-├─ logs/                        安全日志读取
+├─ logs/                        安全日志读取、Xray 按日轮转及保留清理
 └─ helper.ts                    root helper 的固定动作实现
 ```
 
@@ -28,6 +28,7 @@ src/
 - `/api/{protocol}/*` 和 `/api/log/*` 使用来源 CIDR 守卫；`/api/health` 当前不使用该守卫。
 - `TRUST_PROXY=true` 时只信任 loopback 代理；未知 DTO 字段拒绝，nodeId 必须匹配本机 NODE_ID。
 - Ubuntu x64/arm64、Alibaba Cloud Linux 3 x64 及其宝塔 Nginx 组合是当前支持范围。其他系统、Alibaba Cloud Linux 2/4、Alibaba Cloud Linux 3 ARM 或宝塔非 Nginx 组合预检失败。
+- LogRotationService 每天 00:00 轮转受管 Xray 日志，启动时检查补偿，失败时延迟一分钟重试。按可配置时区复制归档并原地清空，不重启核心；归档为未压缩的日期 `.log`，默认保留 7 天。每个文件的轮转日期保存在 SQLite meta，中心沿用现有日志接口读取。
 
 ## 生命周期与配置
 

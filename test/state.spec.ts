@@ -78,6 +78,8 @@ function fixtureConfig(directory: string): AppConfig {
     stateDir: directory,
     stateKeyPath: join(directory, 'state.key'),
     logDir: join(directory, 'logs'),
+    xrayLogTimezone: 'Asia/Shanghai',
+    xrayLogRetentionDays: 7,
     xrayBinary: '/usr/local/bin/xray',
     xrayApiAddress: '127.0.0.1:10000',
     acmeEmail: null,

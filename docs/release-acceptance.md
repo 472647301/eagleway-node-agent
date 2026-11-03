@@ -1,6 +1,12 @@
 # 当前 Agent 上线验收
 
-更新日期：2026-11-01。当前源码包版本见 `package.json`（0.2.3）；以实际发布的 commit、tag 和 release-manifest 为验收对象。本轮代码修改没有执行 VPS 灰度，也没有发布 release。
+更新日期：2026-11-03。当前源码包版本见 `package.json`（0.2.4）；以实际发布的 commit、tag 和 release-manifest 为验收对象。本轮代码修改没有执行 VPS 灰度，也没有发布 release。
+
+## 0.2.4 Xray 日志按日归档
+
+新增 Xray access/error 日志的每日 00:00 轮转、启动补偿和失败延迟重试。归档使用前一天的日期，不压缩，默认保留 7 天；中心沿用现有文件列表及分页接口读取。详细行为和可配置项见[操作手册](operations-runbook.md#13-监控与周期维护)。
+
+2026-11-03 在 Windows 本机通过格式、类型检查及构建；轮转、配置和中心 API 相关测试 15 项通过、1 项软链接测试因 Windows 权限限制跳过。全量测试中另有 6 项原有用例因 Windows 权限或平台差异失败，Linux CI 和 VPS 验收仍待执行。
 
 ## 本地与 CI 入口
 

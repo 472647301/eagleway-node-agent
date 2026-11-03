@@ -8,6 +8,7 @@ import { Test } from '@nestjs/testing'
 import request from 'supertest'
 import { AppModule } from '@/app.module'
 import { HttpExceptionFilter } from '@/common/api/http-exception.filter'
+import { LogRotationService } from '@/logs/log-rotation.service'
 
 test('status API enforces node identity and the frozen response envelope', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'eagleway-agent-api-'))
@@ -105,6 +106,32 @@ test('status API enforces node identity and the frozen response envelope', async
         message: 'started'
       })
     })
+
+    await app.get(LogRotationService).trigger()
+    const archive = 'xray-access-2026-11-02.log'
+    writeFileSync(
+      join(logDirectory, archive),
+      'first connection\nlast connection\n'
+    )
+    writeFileSync(
+      join(logDirectory, '.xray-access.log.rotation.tmp'),
+      'partial copy'
+    )
+    const archivedFiles = await request(app.getHttpServer())
+      .post('/api/log/files')
+      .send({})
+      .expect(200)
+    assert.deepEqual(archivedFiles.body.data, ['agent.log', archive])
+    const archivedLogs = await request(app.getHttpServer())
+      .post('/api/log/pages')
+      .send({ filename: archive, page: 1, pageSize: 1 })
+      .expect(200)
+    assert.equal(archivedLogs.body.data.total, 2)
+    assert.equal(archivedLogs.body.data.data[0].raw, 'last connection')
+    await request(app.getHttpServer())
+      .post('/api/log/pages')
+      .send({ filename: '.xray-access.log.rotation.tmp' })
+      .expect(400)
 
     const invalidLogRequest = await request(app.getHttpServer())
       .post('/api/log/pages')

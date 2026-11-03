@@ -116,6 +116,8 @@ REPORTING_ENABLED=false
 STATE_DIR=/var/lib/eagleway-node-agent
 STATE_KEY_PATH=/etc/eagleway-node-agent/state.key
 LOG_DIR=/var/log/eagleway-node-agent
+XRAY_LOG_TIMEZONE=Asia/Shanghai
+XRAY_LOG_RETENTION_DAYS=7
 XRAY_BINARY=/usr/local/bin/xray
 XRAY_API_ADDRESS=127.0.0.1:10000
 ACME_EMAIL=
@@ -154,8 +156,8 @@ git pull --ff-only
 pnpm verify
 git status --short
 git push origin main
-git tag -a v0.2.3 -m "release: v0.2.3"
-git push origin v0.2.3
+git tag -a v0.2.4 -m "release: v0.2.4"
+git push origin v0.2.4
 ~~~
 
 `git status --short` 应无输出。推送 `v*` tag 后，在以下地址查看构建进度：
@@ -163,7 +165,7 @@ git push origin v0.2.3
 - https://github.com/472647301/eagleway-node-agent/actions/workflows/release.yml
 - https://github.com/472647301/eagleway-node-agent/releases
 
-不要移动或强制覆盖已经发布的 tag。发布内容需要修正时，提交修复并创建新的递增版本 tag，例如从 `v0.2.3` 递增到 `v0.2.4`。
+不要移动或强制覆盖已经发布的 tag。发布内容需要修正时，提交修复并创建新的递增版本 tag，例如从 `v0.2.4` 递增到 `v0.2.5`。
 
 ### 5.2 VPS 首次部署
 
@@ -172,7 +174,7 @@ Release workflow 在 Linux x64/arm64 runner 上构建对应架构的生产发布
 等待 GitHub Release 中出现 x64 和 arm64 产物后，在 VPS 执行：
 
 ~~~bash
-TAG=v0.2.3
+TAG=v0.2.4
 curl -fsSL "https://raw.githubusercontent.com/472647301/eagleway-node-agent/${TAG}/scripts/deploy-ubuntu-release.sh" -o /tmp/eagleway-deploy.sh
 bash /tmp/eagleway-deploy.sh "${TAG}"
 ~~~
@@ -559,7 +561,7 @@ printf '%s\n' "$BACKUP_DIR"
 公开仓库无需 deploy key、源码 checkout、pnpm 或开发依赖。确认对应 tag 的 Release workflow 成功后执行：
 
 ~~~bash
-bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.2.3
+bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.2.4
 ~~~
 
 脚本会自动选择本机架构并验证 SHA-256。需要部署指定配置文件时，将其作为第二个参数传入。
@@ -599,7 +601,7 @@ sudo systemctl is-active eagleway-xray.service
 
 ### 9.6 Xray-core 升级
 
-0.2.3 固定安装 Xray-core v26.10.31。存量节点先按第 9.3–9.5 节部署新版 Agent，再在维护窗口通过中心 API 卸载协议、重新安装并全量同步用户。仅部署 Agent、重复 install 或 config/apply 都不会升级已安装的核心。
+0.2.4 固定安装 Xray-core v26.10.31。存量节点先按第 9.3–9.5 节部署新版 Agent，再在维护窗口通过中心 API 卸载协议、重新安装并全量同步用户。仅部署 Agent、重复 install 或 config/apply 都不会升级已安装的核心。
 
 维护期间保持节点启用、中心后台任务正常运行，避免并发控制和用户分配变更；先部署中心的 runtimeEpoch 流量基线修复。以下请求使用中心已有管理员鉴权，安装配置及用户凭据由中心从数据库读取。
 
@@ -732,22 +734,18 @@ sudo certbot renew --dry-run
 
 宝塔证书请替换为 /www/server/panel/vhost/cert 下的实际路径。Agent 使用或签发 Certbot 证书时会安装受管 deploy hook；续期成功后，仅当当前 Xray 配置引用该证书 lineage 时才尝试重启运行时。宝塔面板自行管理的证书不经过 Certbot hook，续期成功后仍必须在维护窗口重启 Xray 并验证 TLS，避免进程继续使用旧证书。
 
-当前 bootstrap 也没有安装日志轮转策略。生产环境应由系统 logrotate 管理 /var/log/eagleway-node-agent/*.log，例如：
+Agent 每天 00:00 轮转 `xray-access.log`、`xray-error.log`，启动时检查并补偿错过的轮转，正常运行时不进行每分钟轮询。只有轮转或清理失败时才延迟一分钟重试，成功后不再重试。`XRAY_LOG_TIMEZONE` 默认 `Asia/Shanghai`，独立于服务器时区；`XRAY_LOG_RETENTION_DAYS` 默认 7，允许 1–3650。存量 env 未设置时使用默认值，无需改 Xray 配置或重启核心。
 
-~~~text
-/var/log/eagleway-node-agent/*.log {
-    daily
-    rotate 14
-    compress
-    delaycompress
-    missingok
-    notifempty
-    create 0640 eagleway-agent eagleway-agent
-    copytruncate
-}
-~~~
+- 跨天后将当前文件复制到隐藏的 `.tmp` 文件，复制并同步完成后原子发布为 `xray-access-YYYY-MM-DD.log` 或 `xray-error-YYYY-MM-DD.log`，随后原地清空当前文件。不压缩、不重建当前文件，Xray 继续通过原有文件描述符写入；复制快照之后、清空之前产生的少量日志允许丢失。
+- 日期统一取执行轮转时的前一天。例如 11 月 3 日零点归档为 `xray-access-2026-11-02.log`。Agent 停机跨多天后恢复只补一次轮转，混合日志也归到恢复当天的前一天，不逐行拆分、不补建空日期文件。日期表示归档归属日，不保证其中每条记录都属于该日。
+- SQLite meta 按文件保存已轮转日期，同一天重启不会重复轮转。首次升级没有轮转记录时，已有非空日志立即按前一天归档；缺失或空文件不生成归档。
+- 已有同名归档不覆盖，重试或异常恢复时追加 `-1`、`-2` 等编号，例如 `xray-access-2026-11-02-1.log`。失败保留当前日志并在一分钟后重试；如果发布后清空或状态写入失败，重试归档可能包含重复记录。
+- 保留按归档日期计算的最近 7 个已结束日期，删除更早的受管 Xray 日期归档。例如 11 月 10 日保留 11 月 3–9 日的归档及当前日志。当前文件、其他名称文件、目录和软链接不参与清理。
+- 中心通过 `POST /api/log/files` 列出当前及历史 `.log` 文件，再用 `POST /api/log/pages` 指定 `filename` 分页读取；临时复制文件不在列表中，也不可通过分页接口读取。
 
-上线前应由运维将经过评审的规则写入 /etc/logrotate.d/eagleway-node-agent，并用 logrotate debug/dry-run 验证。不要未经检查直接删除当前日志或整个日志目录。
+Agent 停止期间不会执行轮转或清理，单日日志也没有大小硬上限，仍需磁盘容量告警。切日使用上述配置时区，Xray 每行时间戳仍使用核心自身的时间设置，要求一致时应统一服务器时区。
+
+不要同时用系统 logrotate 或其他任务轮转这两个 Xray 文件，也不要用 `/var/log/eagleway-node-agent/*.log` 通配符处理日期归档。PM2 的 `agent.log`、`agent-error.log` 仍需独立配置轮转策略；不要未经检查删除当前日志或整个目录。
 
 ## 14. 备份与恢复原则
 
