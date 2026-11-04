@@ -192,8 +192,8 @@ PM2 7.1.0 随 CI release 打包。manifest v2 校验平台、架构、最低 Nod
 ~~~bash
 readlink -f /opt/eagleway-node-agent/current
 cat /opt/eagleway-node-agent/current/runtime/node.json
-sudo -u eagleway-agent -H eagleway-agent-pm2 status
-sudo -u eagleway-agent -H eagleway-agent-pm2 describe eagleway-node-agent
+sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 status
+sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 describe eagleway-node-agent
 curl -sS http://127.0.0.1:8086/api/health
 sudo -u eagleway-agent -H sudo -n -l
 ~~~
@@ -210,22 +210,22 @@ sudo -u eagleway-agent -H sudo -n -l
 仅重启 Agent，不发布新源码：
 
 ~~~bash
-sudo -u eagleway-agent -H eagleway-agent-pm2 restart eagleway-node-agent
+sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 restart eagleway-node-agent
 ~~~
 
 修改了 /etc/eagleway-node-agent/agent.env 后重载环境：
 
 ~~~bash
-sudo -u eagleway-agent -H eagleway-agent-pm2 restart eagleway-node-agent --update-env
+sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 restart eagleway-node-agent --update-env
 ~~~
 
-查看状态和日志：
+PM2 管理命令使用绝对路径，避免 `sudo` 的 `secure_path` 未包含 `/usr/local/bin` 时出现 `command not found`。查看状态和日志：
 
 ~~~bash
-sudo -u eagleway-agent -H eagleway-agent-pm2 status
-sudo -u eagleway-agent -H eagleway-agent-pm2 describe eagleway-node-agent
-sudo -u eagleway-agent -H eagleway-agent-pm2 logs eagleway-node-agent --nostream --lines 200
-sudo -u eagleway-agent -H eagleway-agent-pm2 logs eagleway-node-agent --lines 200
+sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 status
+sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 describe eagleway-node-agent
+sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 logs eagleway-node-agent --nostream --lines 200
+sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 logs eagleway-node-agent --lines 200
 sudo tail -n 200 /var/log/eagleway-node-agent/agent-error.log
 sudo tail -F /var/log/eagleway-node-agent/agent.log
 sudo journalctl -u eagleway-xray.service -n 200 --no-pager
@@ -544,7 +544,7 @@ cat /opt/eagleway-node-agent/current/release-manifest.json
 确认没有活动操作后停止 Agent。Xray systemd 服务会继续承载已有代理流量，但维护期间中心不能控制节点。
 
 ~~~bash
-sudo -u eagleway-agent -H eagleway-agent-pm2 stop eagleway-node-agent
+sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 stop eagleway-node-agent
 BACKUP_DIR="/var/backups/eagleway-node-agent/$(date -u +%Y%m%d%H%M%S)"
 sudo install -d -m 0700 "$BACKUP_DIR"
 sudo cp -a /etc/eagleway-node-agent "$BACKUP_DIR/config"
@@ -573,7 +573,7 @@ bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.2.4
 如果 bootstrap 在 PM2 切换前失败，可恢复旧 Agent（首次从 0.2.0 升级且新版命令尚未安装时，用原全局 `pm2`）：
 
 ~~~bash
-sudo -u eagleway-agent -H eagleway-agent-pm2 restart eagleway-node-agent
+sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 restart eagleway-node-agent
 ~~~
 
 如果下载、校验、解压或 bootstrap 失败，也应立即执行上述命令恢复旧 Agent，再处理发布包问题。
@@ -582,7 +582,7 @@ sudo -u eagleway-agent -H eagleway-agent-pm2 restart eagleway-node-agent
 
 ~~~bash
 readlink -f /opt/eagleway-node-agent/current
-sudo -u eagleway-agent -H eagleway-agent-pm2 describe eagleway-node-agent
+sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 describe eagleway-node-agent
 curl -sS http://127.0.0.1:8086/api/health
 sudo systemctl is-active eagleway-xray.service
 ~~~
@@ -641,9 +641,9 @@ sudo install -o root -g root -m 0755 "$PREVIOUS_RELEASE/scripts/eagleway-agent-p
 sudo install -o root -g root -m 0644 "$PREVIOUS_RELEASE/scripts/pm2-eagleway-agent.service" /etc/systemd/system/pm2-eagleway-agent.service
 sudo install -o root -g root -m 0440 "$PREVIOUS_RELEASE/scripts/eagleway-node-agent.sudoers" /etc/sudoers.d/eagleway-node-agent
 sudo visudo -cf /etc/sudoers.d/eagleway-node-agent
-sudo -u eagleway-agent env HOME=/home/eagleway-agent eagleway-agent-pm2 start /opt/eagleway-node-agent/current/ecosystem.config.cjs
-sudo -u eagleway-agent env HOME=/home/eagleway-agent eagleway-agent-pm2 save
-sudo -u eagleway-agent -H eagleway-agent-pm2 kill
+sudo -u eagleway-agent env HOME=/home/eagleway-agent /usr/local/bin/eagleway-agent-pm2 start /opt/eagleway-node-agent/current/ecosystem.config.cjs
+sudo -u eagleway-agent env HOME=/home/eagleway-agent /usr/local/bin/eagleway-agent-pm2 save
+sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 kill
 sudo systemctl daemon-reload
 sudo systemctl start pm2-eagleway-agent.service
 ~~~
@@ -655,7 +655,7 @@ sudo systemctl start pm2-eagleway-agent.service
 Agent 重启：
 
 ~~~bash
-sudo -u eagleway-agent -H eagleway-agent-pm2 restart eagleway-node-agent
+sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 restart eagleway-node-agent
 ~~~
 
 Xray 重启必须通过 Agent API start/stop；不要用 systemctl 绕过 Agent 进行日常控制。紧急排障后如果直接操作过 systemctl，必须再次查询 Agent status 和 traffic。
@@ -663,7 +663,7 @@ Xray 重启必须通过 Agent API start/stop；不要用 systemctl 绕过 Agent 
 服务器重启前：
 
 ~~~bash
-sudo -u eagleway-agent -H eagleway-agent-pm2 save
+sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 save
 systemctl is-enabled pm2-eagleway-agent.service
 systemctl is-enabled eagleway-xray.service
 ~~~
@@ -692,8 +692,8 @@ Xray 发布包下载采用流式写入，单次下载超时为 10 分钟，并�
 
 ~~~bash
 readlink -f /opt/eagleway-node-agent/current
-sudo -u eagleway-agent -H eagleway-agent-pm2 describe eagleway-node-agent
-sudo -u eagleway-agent -H eagleway-agent-pm2 logs eagleway-node-agent --nostream --lines 200
+sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 describe eagleway-node-agent
+sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 logs eagleway-node-agent --nostream --lines 200
 sudo systemctl status eagleway-xray.service --no-pager -l
 sudo journalctl -u eagleway-xray.service -n 200 --no-pager
 sudo ss -ltnp
@@ -717,7 +717,7 @@ command -v certbot >/dev/null && sudo certbot certificates
 
 ~~~bash
 curl -fsS http://127.0.0.1:8086/api/health
-sudo -u eagleway-agent -H eagleway-agent-pm2 status
+sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 status
 sudo systemctl is-active eagleway-xray.service
 df -h /opt /var /etc
 du -sh /opt/eagleway-node-agent/releases /var/lib/eagleway-node-agent /var/log/eagleway-node-agent

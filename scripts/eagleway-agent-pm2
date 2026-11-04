@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$(/usr/bin/id -un)" != eagleway-agent ]; then
-  echo "Run as the service user: sudo -u eagleway-agent -H eagleway-agent-pm2 $*" >&2
+  echo "Run as the service user: sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 $*" >&2
   exit 1
 fi
 

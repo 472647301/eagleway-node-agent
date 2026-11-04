@@ -122,9 +122,9 @@ sudo firewall-cmd --state                 # Alibaba Cloud Linux 3
 安装或修改 Xray 配置时，受限 helper 会在已启用的 UFW 或 firewalld 中自动放行 TCP 80 和当前协议端口；云安全组仍需在云平台配置。
 
 ```bash
-sudo -u eagleway-agent -H eagleway-agent-pm2 status
-sudo -u eagleway-agent -H eagleway-agent-pm2 describe eagleway-node-agent
-sudo -u eagleway-agent -H eagleway-agent-pm2 logs eagleway-node-agent --nostream --lines 200
+sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 status
+sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 describe eagleway-node-agent
+sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 logs eagleway-node-agent --nostream --lines 200
 curl -fsS http://127.0.0.1:8086/api/health
 ```
 

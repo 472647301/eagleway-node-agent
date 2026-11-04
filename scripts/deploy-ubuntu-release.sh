@@ -138,6 +138,6 @@ fi
 
 echo
 echo "Deployment completed. Useful commands:"
-echo "  sudo -u eagleway-agent -H eagleway-agent-pm2 status"
-echo "  sudo -u eagleway-agent -H eagleway-agent-pm2 logs eagleway-node-agent --lines 200"
+echo "  sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 status"
+echo "  sudo -u eagleway-agent -H /usr/local/bin/eagleway-agent-pm2 logs eagleway-node-agent --lines 200"
 echo "  curl -fsS http://127.0.0.1:8086/api/health"
