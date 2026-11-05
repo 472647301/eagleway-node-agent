@@ -1,6 +1,12 @@
 # 当前 Agent 上线验收
 
-更新日期：2026-11-03。当前源码包版本见 `package.json`（0.2.4）；以实际发布的 commit、tag 和 release-manifest 为验收对象。本轮代码修改没有执行 VPS 灰度，也没有发布 release。
+更新日期：2026-11-06。当前源码包版本见 `package.json`（0.2.5）；以实际发布的 commit、tag 和 release-manifest 为验收对象。本轮代码修改没有执行 VPS 灰度，也没有发布 release。
+
+## 0.2.5 部署防火墙规则持久化
+
+部署脚本补齐 UFW inactive 时的规则保存及校验、firewalld inactive 时的离线永久规则写入，并通过 `AGENT_FIREWALL_MANAGER` 明确共存时的选择与冲突处理。脚本保持现有防火墙启停状态，规则保存或校验失败时中止部署。
+
+2026-11-06 本机通过 11 项防火墙模拟回归及 8 项 Node 运行时测试，1 项 Linux 专属用例跳过；Shell 语法、测试文件格式、差异检查及发布包必需文件检查通过。Linux 实机与重启后的连通性仍需按下方清单验收。
 
 ## 0.2.4 Xray 日志按日归档
 

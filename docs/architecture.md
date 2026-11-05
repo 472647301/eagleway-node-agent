@@ -1,6 +1,6 @@
 # 当前 Node Agent 架构
 
-核对日期：2026-11-03。当前包版本为 0.2.4（发布时重新读取 `package.json`）。本文是源码说明，服务器部署证据见[上线验收](release-acceptance.md)。
+核对日期：2026-11-03。当前包版本为 0.2.5（发布时重新读取 `package.json`）。本文是源码说明，服务器部署证据见[上线验收](release-acceptance.md)。
 
 ## 实际模块
 
