@@ -72,6 +72,7 @@ NestJS common/core/platform-express/testing 统一到 11.2.7，带入 Multer 2.4
 - [ ] 在普通 Ubuntu、Ubuntu 宝塔 Nginx、Alibaba Cloud Linux 3 x64 与其宝塔 Nginx 环境验证首次 Bootstrap、独立 env、权限、helper 和 PM2 自启动。
 - [ ] 在 Alibaba Cloud Linux 3 的 `5.10.134-17.2.al8` 与 `5.10.134-19.1.al8` 节点验证 DNF、Node.js 22、EPEL Certbot、标准/宝塔 Nginx、`better-sqlite3` 和 firewalld inactive/active 两种路径。
 - [ ] 核验 ALLOWED_CIDRS、可信 loopback 代理、云安全组及主机防火墙；非允许来源被拒绝。
+- [ ] 验证 UFW active/inactive 都保存来源受限的控制端口规则，inactive 写入后再启用能从中心访问；验证 firewalld 在线/离线永久规则及重启后连通性。核对两种管理器共存时自动选择、显式选择和冲突拒绝，以及重复部署、保存失败和原启停状态不变。
 - [ ] 在 Linux x64/arm64 通过真实 v26.10.31 核心集成测试，并核对新装及存量节点的 runtimeVersion；验证中心 API 卸载、重装、同步用户的升级流程及失败恢复。
 - [ ] 三协议分别验证安装、证书获取/复用、start/stop、状态、日志、卸载/重复卸载及重装。
 - [ ] 验证配置应用、修订幂等/冲突、失败恢复及中心生效配置收敛。

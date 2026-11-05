@@ -60,6 +60,8 @@ unset NODE_OPTIONS NODE_PATH
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=node-runtime.sh
 . "${SCRIPT_DIR}/node-runtime.sh"
+# shellcheck source=agent-firewall.sh
+. "${SCRIPT_DIR}/agent-firewall.sh"
 RELEASE_SOURCE_DIR="$(realpath "${1:-${SCRIPT_DIR}/..}")"
 ENV_FILE_INPUT="${2:-${RELEASE_SOURCE_DIR}/.env}"
 [[ -f "${ENV_FILE_INPUT}" ]] || { echo "Missing environment file: ${ENV_FILE_INPUT}" >&2; exit 1; }
@@ -116,6 +118,8 @@ RUNTIME_ENV="$(required_env NODE_ENV)"
 AGENT_PORT="$(required_env PORT)"
 NODE_ID="$(required_env NODE_ID)"
 ALLOWED_CIDRS="$(required_env ALLOWED_CIDRS)"
+AGENT_FIREWALL_MANAGER="$(env_value AGENT_FIREWALL_MANAGER || true)"
+AGENT_FIREWALL_MANAGER="${AGENT_FIREWALL_MANAGER:-auto}"
 REPORTING_ENABLED="$(required_env REPORTING_ENABLED)"
 CENTER_API_URL="$(env_value CENTER_API_URL || true)"
 
@@ -149,6 +153,7 @@ esac
   && -f "${RELEASE_SOURCE_DIR}/scripts/deploy-ubuntu-release.sh" \
   && -f "${RELEASE_SOURCE_DIR}/scripts/uninstall-ubuntu.sh" \
   && -f "${RELEASE_SOURCE_DIR}/scripts/node-runtime.sh" \
+  && -f "${RELEASE_SOURCE_DIR}/scripts/agent-firewall.sh" \
   && -f "${RELEASE_SOURCE_DIR}/scripts/eagleway-agent-pm2" \
   && -f "${RELEASE_SOURCE_DIR}/scripts/pm2-eagleway-agent.service" \
   && -f "${RELEASE_SOURCE_DIR}/scripts/eagleway-node-helper" \
@@ -176,6 +181,9 @@ assert_fixed_env STATE_KEY_PATH "${CONFIG_ROOT}/state.key"
 assert_fixed_env LOG_DIR "${LOG_ROOT}"
 assert_fixed_env XRAY_BINARY /usr/local/bin/xray
 assert_fixed_env PRIVILEGED_HELPER /usr/local/libexec/eagleway-node-helper
+
+# Reject conflicting or ambiguous firewall managers before changing the host.
+select_agent_firewall "${AGENT_FIREWALL_MANAGER}"
 
 if [[ "${OS_FAMILY}" == "ubuntu" ]]; then
   export DEBIAN_FRONTEND=noninteractive
@@ -318,53 +326,8 @@ systemctl enable pm2-eagleway-agent.service
 systemctl start pm2-eagleway-agent.service
 systemctl is-active --quiet pm2-eagleway-agent.service
 
-UFW_ACTIVE=false
-FIREWALLD_ACTIVE=false
-if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
-  UFW_ACTIVE=true
-fi
-if command -v firewall-cmd >/dev/null 2>&1 \
-  && systemctl is-active --quiet firewalld; then
-  FIREWALLD_ACTIVE=true
-fi
-if [[ "${UFW_ACTIVE}" == "true" && "${FIREWALLD_ACTIVE}" == "true" ]]; then
-  echo "Multiple supported host firewalls are active" >&2
-  exit 1
-fi
-if [[ "${UFW_ACTIVE}" == "true" ]]; then
-  IFS=',' read -ra CIDRS <<< "${ALLOWED_CIDRS}"
-  for cidr in "${CIDRS[@]}"; do
-    cidr="$(printf '%s' "${cidr}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-    [[ -n "${cidr}" ]] || continue
-    ufw allow from "${cidr}" to any port "${AGENT_PORT}" proto tcp
-  done
-elif [[ "${FIREWALLD_ACTIVE}" == "true" ]]; then
-  FIREWALL_ZONE="$(firewall-cmd --get-default-zone)"
-  [[ "${FIREWALL_ZONE}" =~ ^[A-Za-z0-9_-]+$ ]] || {
-    echo "firewalld returned an invalid default zone" >&2
-    exit 1
-  }
-  printf '%s\n' "${FIREWALL_ZONE}" > "${AGENT_FIREWALL_ZONE_FILE}"
-  chown root:root "${AGENT_FIREWALL_ZONE_FILE}"
-  chmod 0600 "${AGENT_FIREWALL_ZONE_FILE}"
-  IFS=',' read -ra CIDRS <<< "${ALLOWED_CIDRS}"
-  for cidr in "${CIDRS[@]}"; do
-    cidr="$(printf '%s' "${cidr}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-    [[ -n "${cidr}" ]] || continue
-    if [[ "${cidr}" == *:* ]]; then
-      FIREWALL_FAMILY="ipv6"
-    else
-      FIREWALL_FAMILY="ipv4"
-    fi
-    FIREWALL_RULE="rule family=\"${FIREWALL_FAMILY}\" source address=\"${cidr}\" port port=\"${AGENT_PORT}\" protocol=\"tcp\" accept"
-    if ! firewall-cmd --zone="${FIREWALL_ZONE}" --query-rich-rule="${FIREWALL_RULE}" >/dev/null; then
-      firewall-cmd --zone="${FIREWALL_ZONE}" --add-rich-rule="${FIREWALL_RULE}"
-    fi
-    if ! firewall-cmd --permanent --zone="${FIREWALL_ZONE}" --query-rich-rule="${FIREWALL_RULE}" >/dev/null; then
-      firewall-cmd --permanent --zone="${FIREWALL_ZONE}" --add-rich-rule="${FIREWALL_RULE}"
-    fi
-  done
-fi
+configure_agent_firewall "${AGENT_FIREWALL_MANAGER}" "${AGENT_PORT}" \
+  "${ALLOWED_CIDRS}" "${AGENT_FIREWALL_ZONE_FILE}"
 
 echo "Eagleway Node Agent installed in ${RELEASE_DIR}"
 echo "Runtime: Node.js ${NODE_VERSION} (${NODE_BIN}); PM2: /usr/local/bin/eagleway-agent-pm2"

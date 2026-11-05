@@ -142,7 +142,8 @@ REPORTING_ENABLED=true
 - STATE_DIR、STATE_KEY_PATH、LOG_DIR、XRAY_BINARY 和 PRIVILEGED_HELPER 如果显式配置，必须使用项目固定路径。
 - 修改 /etc 下的运行配置只能作为应急操作；下次 bootstrap 会用传入的 env 文件覆盖它，因此最终修改必须回写长期维护的 env 文件。
 - 中心出口 IP 变化时，先追加新 CIDR并验证，再删除旧 CIDR。
-- Bootstrap 只新增当前 CIDR 对应的 UFW allow 或 firewalld rich rule，不会自动删除配置变更后遗留的历史规则；确认新来源可用后需要人工清理旧规则。
+- `AGENT_FIREWALL_MANAGER=auto` 是部署脚本默认值，优先使用运行中的 UFW/firewalld；均未运行时选择唯一已安装者。两者都已安装但均未运行时必须在独立 env 文件中显式设置 `ufw` 或 `firewalld`，选择未安装者或与当前运行者冲突时拒绝部署；两者同时运行也拒绝部署。脚本不会启停或 reload 防火墙。
+- Bootstrap 只新增当前 CIDR 对应的控制端口规则，不会自动删除配置变更后遗留的历史规则。选中 UFW 时即使 inactive 也写入，并通过 `ufw show added` 校验保存的规则（带 `eagleway-node-agent:control:` 标记）；选中 firewalld 时始终写入并校验永久规则，inactive 使用离线配置，active 另同步运行时规则。规则失败会中止部署。firewalld 使用默认 zone，须核对实际网卡所属 zone；确认新来源可用后需要人工清理旧规则。
 
 ## 5. 发布与首次部署
 

@@ -34,6 +34,8 @@ Agent 重启将未完成操作标记为失败并在状态查询时核对实际�
 
 ## 网络访问
 
-云安全组、主机防火墙和 ALLOWED_CIDRS 同时核对中心出口来源。Bootstrap 为已启用 UFW 或 firewalld 添加当前控制端口来源规则，不自动删除配置变更后遗留的历史规则。TRUST_PROXY=true 时应用仅信任 loopback 代理。
+云安全组、主机防火墙和 ALLOWED_CIDRS 同时核对中心出口来源。Bootstrap 的 `AGENT_FIREWALL_MANAGER` 默认为 `auto`：优先使用正在运行的 UFW/firewalld；均未运行时选择唯一已安装的管理器，两者都已安装时要求显式设置 `ufw` 或 `firewalld`。两者同时运行、显式选择未安装的管理器或选择与当前运行者冲突时中止部署；均未安装时提示需要另外配置网络访问。
+
+选中 UFW 后，无论是否启用，都添加来源受限的控制端口规则，并通过 `ufw show added` 校验带有 `eagleway-node-agent:control:` 标记的保存规则。选中 firewalld 后始终写入并校验永久规则，未运行时使用离线配置；运行时另外同步并校验运行时规则。脚本不启用、停止或 reload 防火墙，规则写入或校验失败会中止部署。firewalld 沿用默认 zone，部署时仍须核对实际入站网卡所属 zone。Bootstrap 不自动删除配置变更后遗留的历史规则。TRUST_PROXY=true 时应用仅信任 loopback 代理。
 
 以上行为依据当前 scripts、host、helper、state 与 operations 源码；当前 release 的真实服务器结果见[上线验收](release-acceptance.md)。

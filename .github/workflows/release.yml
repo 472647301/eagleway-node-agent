@@ -106,6 +106,7 @@ jobs:
           test -f "${release_dir}/scripts/deploy-ubuntu-release.sh"
           test -f "${release_dir}/scripts/uninstall-ubuntu.sh"
           test -f "${release_dir}/scripts/node-runtime.sh"
+          test -f "${release_dir}/scripts/agent-firewall.sh"
           test -f "${release_dir}/scripts/eagleway-agent-pm2"
           test -f "${release_dir}/scripts/pm2-eagleway-agent.service"
           test -f "${release_dir}/node_modules/pm2/bin/pm2"
