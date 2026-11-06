@@ -188,8 +188,8 @@ git pull --ff-only
 pnpm verify
 git status --short
 git push origin main
-git tag -a v0.2.6 -m "release: v0.2.6"
-git push origin v0.2.6
+git tag -a v0.2.7 -m "release: v0.2.7"
+git push origin v0.2.7
 ~~~
 
 `git status --short` 应无输出。推送 `v*` tag 后，在以下地址查看构建进度：
@@ -197,7 +197,7 @@ git push origin v0.2.6
 - https://github.com/472647301/eagleway-node-agent/actions/workflows/release.yml
 - https://github.com/472647301/eagleway-node-agent/releases
 
-不要移动或强制覆盖已经发布的 tag。发布内容需要修正时，提交修复并创建新的递增版本 tag，例如从 `v0.2.5` 递增到 `v0.2.6`。
+不要移动或强制覆盖已经发布的 tag。发布内容需要修正时，提交修复并创建新的递增版本 tag，例如从 `v0.2.6` 递增到 `v0.2.7`。
 
 ### 5.2 VPS 首次部署
 
@@ -206,7 +206,7 @@ Release workflow 在 Linux x64/arm64 runner 上构建对应架构的生产发布
 等待 GitHub Release 中出现 x64 和 arm64 产物后，在 VPS 执行：
 
 ~~~bash
-TAG=v0.2.6
+TAG=v0.2.7
 curl -fsSL "https://raw.githubusercontent.com/472647301/eagleway-node-agent/${TAG}/scripts/deploy-ubuntu-release.sh" -o /tmp/eagleway-deploy.sh
 bash /tmp/eagleway-deploy.sh "${TAG}"
 ~~~
@@ -489,7 +489,7 @@ post_agent "/api/$PROTOCOL/status" "{\"nodeId\":$NODE_ID}"
 sudo systemctl is-active eagleway-xray.service
 ~~~
 
-stop 后应为 stopped，start 后应为 online。start 会尝试恢复 SQLite 中保存的用户。
+停止请求应返回 `stopped`。启动请求会等待 Xray gRPC 接口就绪，再尝试恢复 SQLite 中保存的用户。验收时确认首次启动请求返回 `online`，并用已有用户凭据验证代理连接。
 
 ### 7.9 基础错误与安全检查
 
@@ -593,7 +593,7 @@ printf '%s\n' "$BACKUP_DIR"
 公开仓库无需 deploy key、源码 checkout、pnpm 或开发依赖。确认对应 tag 的 Release workflow 成功后执行：
 
 ~~~bash
-bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.2.6
+bash /opt/eagleway-node-agent/current/scripts/deploy-ubuntu-release.sh v0.2.7
 ~~~
 
 脚本会自动选择本机架构并验证 SHA-256。需要部署指定配置文件时，将其作为第二个参数传入。
@@ -633,7 +633,7 @@ sudo systemctl is-active eagleway-xray.service
 
 ### 9.6 Xray-core 升级
 
-0.2.6 固定安装 Xray-core v26.10.31。存量节点先按第 9.3–9.5 节部署新版 Agent，再在维护窗口通过中心 API 卸载协议、重新安装并全量同步用户。仅部署 Agent、重复 install 或 config/apply 都不会升级已安装的核心。
+0.2.7 固定安装 Xray-core v26.10.31。存量节点先按第 9.3–9.5 节部署新版 Agent，再在维护窗口通过中心 API 卸载协议、重新安装并全量同步用户。仅部署 Agent、重复 install 或 config/apply 都不会升级已安装的核心。
 
 维护期间保持节点启用、中心后台任务正常运行，避免并发控制和用户分配变更；先部署中心的 runtimeEpoch 流量基线修复。以下请求使用中心已有管理员鉴权，安装配置及用户凭据由中心从数据库读取。
 

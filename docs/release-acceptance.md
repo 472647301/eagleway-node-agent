@@ -1,6 +1,10 @@
 # 当前 Agent 上线验收
 
-更新日期：2026-11-06。当前源码包版本见 `package.json`（0.2.6）；以实际发布的 commit、tag 和 release-manifest 为验收对象。本轮代码修改没有执行 VPS 灰度，也没有发布 release。
+更新日期：2026-11-06。当前源码包版本见 `package.json`（0.2.7）；以实际发布的 commit、tag 和 release-manifest 为验收对象。本轮代码修改没有执行 VPS 灰度，也没有发布 release。
+
+## 0.2.7 停止后首次启动
+
+Agent 会等待 Xray gRPC 接口就绪，再恢复持久化用户。延迟启动的本地 gRPC 回归测试复现了旧代码的连接拒绝，并验证修复后首次启动即可恢复用户并返回 `online`。类型检查通过。Linux CI 和 VPS 验收待执行。
 
 ## 0.2.5 部署防火墙规则持久化
 

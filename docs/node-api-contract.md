@@ -134,7 +134,9 @@
 
 `POST /api/{protocol}/start`
 
-请求为 `{ "nodeId": 12 }`。启动是同步操作。helper 执行 systemd start，确认 Xray 活动并恢复持久化用户后返回 `online`；当前 start 不另行检查外部协议端口或真实代理请求。
+请求为 `{ "nodeId": 12 }`。启动是同步操作。helper 执行 systemd start，确认 Xray 活动后，Agent 等待 gRPC 接口就绪，尝试恢复持久化用户，然后返回 `online`；当前 start 不另行检查外部协议端口或真实代理请求。
+
+等待 gRPC 接口就绪的查询最多运行 10 秒。查询遇到连接不可用或超时时，Agent 返回 HTTP 503 和 `RUNTIME_UNAVAILABLE`。
 
 ### 4.5 停止
 
