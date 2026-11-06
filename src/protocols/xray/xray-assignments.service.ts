@@ -70,7 +70,12 @@ export class XrayAssignmentsService implements OnApplicationBootstrap {
     assertUniqueAssignments(users)
     return this.exclusive(async () => {
       await this.assertRuntimeMutable(protocol)
-      const results = await this.reconcileRuntime(protocol, users)
+      const runtimeUserIds = await this.client.listUserIds(protocol)
+      const results = await this.reconcileRuntime(
+        protocol,
+        users,
+        runtimeUserIds
+      )
       this.requiresSync(
         protocol,
         results.some((item) => item.error)
@@ -164,17 +169,19 @@ export class XrayAssignmentsService implements OnApplicationBootstrap {
   }
 
   private async restore(protocol: XrayProtocol): Promise<void> {
+    this.requiresSync(protocol, true)
+    const runtimeUserIds = await this.client.listUserIds(protocol, {
+      waitForReady: true
+    })
     const stored = this.state.listManagedUsers(protocol)
-    if (!stored.length) {
-      this.requiresSync(protocol, true)
-      return
-    }
+    if (!stored.length) return
     const results = await this.reconcileRuntime(
       protocol,
       stored.map((item) => ({
         assignmentId: item.assignmentId,
         credential: this.vault.decrypt(item.encryptedCredential)
-      }))
+      })),
+      runtimeUserIds
     )
     this.requiresSync(
       protocol,
@@ -184,9 +191,10 @@ export class XrayAssignmentsService implements OnApplicationBootstrap {
 
   private async reconcileRuntime(
     protocol: XrayProtocol,
-    users: NodeUserDto[]
+    users: NodeUserDto[],
+    runtimeUserIds: string[]
   ): Promise<NodeUserResult[]> {
-    const runtimeUsers = new Set(await this.client.listUserIds(protocol))
+    const runtimeUsers = new Set(runtimeUserIds)
     const desiredRuntimeIds = new Set<string>()
     const desiredAssignmentIds = new Set(users.map((item) => item.assignmentId))
     const results: NodeUserResult[] = []

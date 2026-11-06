@@ -1,6 +1,14 @@
 import { Inject, Injectable, OnModuleDestroy } from '@nestjs/common'
-import { Client, credentials, type ServiceError } from '@grpc/grpc-js'
+import {
+  Client,
+  credentials,
+  Metadata,
+  status,
+  type MetadataOptions,
+  type ServiceError
+} from '@grpc/grpc-js'
 import { existsSync } from 'node:fs'
+import { runtimeUnavailable } from '@/common/api/agent-error'
 import { APP_CONFIG, type AppConfig } from '@/config/app-config'
 import { ProcessRunnerService } from '@/host/process-runner.service'
 import {
@@ -90,10 +98,14 @@ export class XrayClient implements OnModuleDestroy {
     return firstLine?.slice(0, 120) ?? null
   }
 
-  async listUserIds(protocol: XrayProtocol): Promise<string[]> {
+  async listUserIds(
+    protocol: XrayProtocol,
+    options?: Pick<MetadataOptions, 'waitForReady'>
+  ): Promise<string[]> {
     const response = await this.unary(
       '/xray.app.proxyman.command.HandlerService/GetInboundUsers',
-      protobufMessage([[1, 'string', inboundTag(protocol)]])
+      protobufMessage([[1, 'string', inboundTag(protocol)]]),
+      options
     )
     return protobufFields(response)
       .filter((field) => field.number === 1 && Buffer.isBuffer(field.value))
@@ -171,16 +183,27 @@ export class XrayClient implements OnModuleDestroy {
     )
   }
 
-  private unary(path: string, body: Buffer): Promise<Buffer> {
+  private unary(
+    path: string,
+    body: Buffer,
+    options?: MetadataOptions
+  ): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       this.grpc.makeUnaryRequest(
         path,
         (value: Buffer) => value,
         (value: Buffer) => value,
         body,
+        new Metadata(options),
         { deadline: Date.now() + 10_000 },
         (error: ServiceError | null, response?: Buffer) => {
-          if (error) reject(error)
+          if (
+            options?.waitForReady &&
+            (error?.code === status.UNAVAILABLE ||
+              error?.code === status.DEADLINE_EXCEEDED)
+          ) {
+            reject(runtimeUnavailable('Xray API is not ready'))
+          } else if (error) reject(error)
           else resolve(response ?? Buffer.alloc(0))
         }
       )
