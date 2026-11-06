@@ -1,6 +1,6 @@
 # 当前安装与运维边界
 
-核对日期：2026-11-01。可执行步骤见[操作手册](operations-runbook.md)，本页说明当前脚本能做什么和需要人工完成什么。
+核对日期：2026-11-06。可执行步骤见[操作手册](operations-runbook.md)，本页说明当前脚本能做什么和需要人工完成什么。
 
 ## 发布与 Bootstrap
 
@@ -17,6 +17,12 @@ PM2 7.1.0 是发布包的生产依赖，服务器不再安装全局 PM2/npm。ma
 主要路径为 `/opt/eagleway-node-agent/releases`、`/opt/eagleway-node-agent/current`、`/etc/eagleway-node-agent`、`/var/lib/eagleway-node-agent`、`/var/log/eagleway-node-agent`。数据库与 state.key 需要一起备份；发布目录不可由 Agent 用户改写。
 
 当前 Bootstrap 不自动备份 SQLite，不执行部署健康检查后的自动回滚。更新前备份、发布后健康与接口检查、失败时人工回滚均按操作手册执行。
+
+## 可选的系统 BBR
+
+Bootstrap 从独立 env 文件读取 `AGENT_ENABLE_BBR`（缺省 `false`）。`true` 检查内核内置/可加载的 BBR，尝试加载 `tcp_bbr`，设置并验证 TCP 拥塞算法 `bbr` 和默认队列 `fq`，持久化到 `/etc/sysctl.d/99-eagleway-bbr.conf`。不支持或设置失败会在切换 Agent 前停止；不更换内核或自动重启。此配置影响系统 TCP 默认值，已有 Xray 需要维护窗口重启监听器后验证，现有网卡队列不自动替换。
+
+`false` 或完整卸载时，只撤销本脚本的受管设置并恢复首次记录的默认值；未管理过的主机保持原样，管理员已改成其他值的设置保留。启用前已经是 BBR 的主机不会被强制切到 CUBIC。应用失败会尝试恢复本次操作前的值；后续部署失败不回滚已成功应用的 BBR。具体操作、作用范围和验收见[BBR 运维说明](operations-runbook.md#41-可选的系统-bbr)。
 
 ## 协议安装与配置
 

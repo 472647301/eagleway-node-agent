@@ -8,6 +8,7 @@ readonly CONFIG_ROOT="/etc/eagleway-node-agent"
 readonly STATE_ROOT="/var/lib/eagleway-node-agent"
 readonly LOG_ROOT="/var/log/eagleway-node-agent"
 readonly AGENT_FIREWALL_ZONE_FILE="${CONFIG_ROOT}/agent-firewall-zone"
+readonly AGENT_BBR_CONFIG_FILE=/etc/sysctl.d/99-eagleway-bbr.conf
 readonly APT_LOCK_TIMEOUT_SECONDS=600
 
 run_apt_get() {
@@ -62,6 +63,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/node-runtime.sh"
 # shellcheck source=agent-firewall.sh
 . "${SCRIPT_DIR}/agent-firewall.sh"
+# shellcheck source=agent-bbr.sh
+. "${SCRIPT_DIR}/agent-bbr.sh"
 RELEASE_SOURCE_DIR="$(realpath "${1:-${SCRIPT_DIR}/..}")"
 ENV_FILE_INPUT="${2:-${RELEASE_SOURCE_DIR}/.env}"
 [[ -f "${ENV_FILE_INPUT}" ]] || { echo "Missing environment file: ${ENV_FILE_INPUT}" >&2; exit 1; }
@@ -120,6 +123,8 @@ NODE_ID="$(required_env NODE_ID)"
 ALLOWED_CIDRS="$(required_env ALLOWED_CIDRS)"
 AGENT_FIREWALL_MANAGER="$(env_value AGENT_FIREWALL_MANAGER || true)"
 AGENT_FIREWALL_MANAGER="${AGENT_FIREWALL_MANAGER:-auto}"
+AGENT_ENABLE_BBR="$(env_value AGENT_ENABLE_BBR || true)"
+AGENT_ENABLE_BBR="${AGENT_ENABLE_BBR:-false}"
 REPORTING_ENABLED="$(required_env REPORTING_ENABLED)"
 CENTER_API_URL="$(env_value CENTER_API_URL || true)"
 
@@ -154,6 +159,7 @@ esac
   && -f "${RELEASE_SOURCE_DIR}/scripts/uninstall-ubuntu.sh" \
   && -f "${RELEASE_SOURCE_DIR}/scripts/node-runtime.sh" \
   && -f "${RELEASE_SOURCE_DIR}/scripts/agent-firewall.sh" \
+  && -f "${RELEASE_SOURCE_DIR}/scripts/agent-bbr.sh" \
   && -f "${RELEASE_SOURCE_DIR}/scripts/eagleway-agent-pm2" \
   && -f "${RELEASE_SOURCE_DIR}/scripts/pm2-eagleway-agent.service" \
   && -f "${RELEASE_SOURCE_DIR}/scripts/eagleway-node-helper" \
@@ -170,6 +176,10 @@ esac
 }
 [[ "${REPORTING_ENABLED}" == "true" || "${REPORTING_ENABLED}" == "false" ]] || {
   echo "REPORTING_ENABLED must be true or false" >&2
+  exit 1
+}
+[[ "${AGENT_ENABLE_BBR}" == true || "${AGENT_ENABLE_BBR}" == false ]] || {
+  echo "AGENT_ENABLE_BBR must be true or false" >&2
   exit 1
 }
 if [[ "${REPORTING_ENABLED}" == "true" && -z "${CENTER_API_URL}" ]]; then
@@ -189,8 +199,14 @@ if [[ "${OS_FAMILY}" == "ubuntu" ]]; then
   export DEBIAN_FRONTEND=noninteractive
   run_apt_get update
   run_apt_get install -y --no-install-recommends ca-certificates curl rsync sudo unzip xz-utils
+  if [[ "${AGENT_ENABLE_BBR}" == true ]]; then
+    run_apt_get install -y --no-install-recommends procps kmod
+  fi
 else
   run_dnf install -y ca-certificates curl rsync shadow-utils sudo unzip util-linux xz
+  if [[ "${AGENT_ENABLE_BBR}" == true ]]; then
+    run_dnf install -y procps-ng kmod
+  fi
   ensure_epel_repository
 fi
 
@@ -278,6 +294,10 @@ PM2_CLI="${RELEASE_DIR}/node_modules/pm2/bin/pm2"
   env -i PATH="${PATH}" DOTENV_CONFIG_PATH="${ENV_FILE}" \
     "${RELEASE_NODE}" -e "require('./dist/config/app-config').loadAppConfig()"
 )
+
+# Apply optional host tuning only after release/config validation, before stopping
+# the existing Agent. Failures restore BBR writes without switching the release.
+configure_agent_bbr "${AGENT_ENABLE_BBR}" "${AGENT_BBR_CONFIG_FILE}"
 
 # Stop the old daemon too: replacing Node on disk does not update a running PM2.
 if systemctl cat pm2-eagleway-agent.service >/dev/null 2>&1; then

@@ -14,6 +14,7 @@ readonly PM2_UNIT_PATH="/etc/systemd/system/${PM2_UNIT}"
 readonly PM2_WRAPPER=/usr/local/bin/eagleway-agent-pm2
 readonly XRAY_MARKER="${CONFIG_ROOT}/runtimes/xray/.managed-by-eagleway-node-agent"
 readonly AGENT_FIREWALL_ZONE_FILE="${CONFIG_ROOT}/agent-firewall-zone"
+readonly AGENT_BBR_CONFIG_FILE=/etc/sysctl.d/99-eagleway-bbr.conf
 
 ASSUME_YES=false
 KEEP_DATA=false
@@ -103,6 +104,14 @@ env_value() {
 
 AGENT_PORT="$(env_value PORT || true)"
 ALLOWED_CIDRS="$(env_value ALLOWED_CIDRS || true)"
+
+# Undo only our host tuning, including with --keep-data, before deleting releases.
+if [[ -e "${AGENT_BBR_CONFIG_FILE}" || -L "${AGENT_BBR_CONFIG_FILE}" ]]; then
+  SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  # shellcheck source=agent-bbr.sh
+  . "${SCRIPT_DIR}/agent-bbr.sh"
+  configure_agent_bbr false "${AGENT_BBR_CONFIG_FILE}"
+fi
 
 echo "Stopping Eagleway Node Agent..."
 PM2_COMMAND=""

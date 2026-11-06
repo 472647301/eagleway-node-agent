@@ -140,6 +140,8 @@ PM2 7.1.0 随 release 打包，管理命令统一为 `eagleway-agent-pm2`。Boot
 
 旧节点应备份配置与 SQLite 后部署新 release；只重新运行旧版 Bootstrap 不会修复它对旧 Node 22 的跳过逻辑。部署后检查 PM2 显示的实际 Node 版本及健康接口。其他服务仍在使用的旧共享 Node，需要由运维单独安排安全更新。
 
+可在长期维护的 `agent.env` 中设置 `AGENT_ENABLE_BBR=true`，由 Bootstrap 启用系统 TCP BBR 和 `fq` 默认队列，写入独立的 `/etc/sysctl.d/99-eagleway-bbr.conf`。缺省为 `false`；未管理过的系统保持原样，曾由脚本开启时恢复记录的原默认值。支持内核内置或 `tcp_bbr` 模块，完全不支持时明确中止部署，不自动更换内核或重启系统。已有 Xray 应在维护窗口重启后重连客户端；脚本不自动重启 Xray，也不替换现有网卡队列。详细行为与验收见[BBR 运维说明](docs/operations-runbook.md#41-可选的系统-bbr)。
+
 首次部署、服务器本机全功能自测、与中心联调、源码升级和人工回滚的可执行步骤见[运维与服务器自测手册](docs/operations-runbook.md)。
 
 ## Linux 卸载

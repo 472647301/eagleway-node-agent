@@ -109,6 +109,7 @@ PORT=8086
 HOST=0.0.0.0
 NODE_ID=1
 ALLOWED_CIDRS=127.0.0.1/32
+AGENT_ENABLE_BBR=false
 TRUST_PROXY=false
 CENTER_API_URL=
 REPORT_INTERVAL_SECONDS=300
@@ -144,6 +145,36 @@ REPORTING_ENABLED=true
 - 中心出口 IP 变化时，先追加新 CIDR并验证，再删除旧 CIDR。
 - `AGENT_FIREWALL_MANAGER=auto` 是部署脚本默认值，优先使用运行中的 UFW/firewalld；均未运行时选择唯一已安装者。两者都已安装但均未运行时必须在独立 env 文件中显式设置 `ufw` 或 `firewalld`，选择未安装者或与当前运行者冲突时拒绝部署；两者同时运行也拒绝部署。脚本不会启停或 reload 防火墙。
 - Bootstrap 只新增当前 CIDR 对应的控制端口规则，不会自动删除配置变更后遗留的历史规则。选中 UFW 时即使 inactive 也写入，并通过 `ufw show added` 校验保存的规则（带 `eagleway-node-agent:control:` 标记）；选中 firewalld 时始终写入并校验永久规则，inactive 使用离线配置，active 另同步运行时规则。规则失败会中止部署。firewalld 使用默认 zone，须核对实际网卡所属 zone；确认新来源可用后需要人工清理旧规则。
+
+### 4.1 可选的系统 BBR
+
+`AGENT_ENABLE_BBR` 仅由 Bootstrap 读取，接受 `true`/`false`，缺省或空值为 `false`。修改长期维护的 env 文件（通常为 `~/.config/eagleway-node-agent/agent.env`）后，部署包含该功能的新 release；只重启 PM2 或修改 shell 临时环境变量不会应用此配置。
+
+~~~dotenv
+AGENT_ENABLE_BBR=true
+~~~
+
+- `true`：准备 `sysctl`/`modprobe` 工具，检查可用拥塞算法；内核内置 BBR 可直接使用，未加载时尝试 `modprobe tcp_bbr`。尝试后仍不支持则在停止旧 Agent、切换 release 前中止部署，并提示更换受支持内核/模块或设为 `false` 后重试；不会安装第三方内核、自动重启或默默跳过。
+- 先通过 release、原生依赖和应用配置验证，再应用 `net.ipv4.tcp_congestion_control=bbr` 和 `net.core.default_qdisc=fq`，验证读回值并保存到 `/etc/sysctl.d/99-eagleway-bbr.conf`。首次启用前的两个默认值记录在文件中，重复部署不覆盖原值。写入或验证失败会尝试恢复本次操作前的值，保留原配置；恢复失败会明确警告。后续部署步骤失败不会自动撤销已经完成的 BBR 配置。
+- `false`：没有本项目的受管文件时完全不改系统；存在时删除该文件，对仍为 `bbr`/`fq` 的默认值恢复首次记录，保留管理员后来改成其他值的设置。启用前本来就是 BBR 的主机仍保留 BBR。Agent 卸载（包括 `--keep-data`）执行同样恢复。受管文件被手动改动、被其他文件占用或是符号链接时拒绝覆盖/删除。
+- 这是系统 TCP 默认配置，也影响主机上的其他 TCP 服务。通常无需重启系统；既有连接不自动切换，已经运行的监听器还可能让新连接继承旧算法。现有 Xray 需要维护窗口重启一次，会断开现有代理连接；首次部署后新安装的 Xray 直接采用新默认值。
+- `default_qdisc=fq` 只改变默认队列选择，不能证明当前网卡队列已经切换。脚本不执行 `tc qdisc replace`，也不重启网卡；已有队列用下列命令检查。现代内核可通过 TCP 内部 pacing 使用 BBR，`fq` 对高负载通常更合适。多队列网卡的根队列可能仍为 `mq`，应查看叶子队列。
+
+应用后检查（在服务器执行）：
+
+~~~bash
+sysctl net.ipv4.tcp_available_congestion_control
+sysctl net.ipv4.tcp_congestion_control net.core.default_qdisc
+tc qdisc show
+~~~
+
+对已经运行的 Xray，先确认无安装/卸载等活动操作，按第 9.1–9.2 节暂停中心修改并备份，完成部署、恢复 Agent 后，记录流量快照。在维护窗口按[第 7.8 节](#78-停止和启动)通过 Agent 的 `stop`、`start` 接口依次停止和启动当前协议；`start` 会恢复 SQLite 中的用户。不要只执行 `systemctl restart eagleway-xray.service`，因为动态用户需要 Agent 恢复。
+
+随后重新连接客户端并发起代理下载，用 `sudo ss -tinp` 检查对应公网代理端口的连接显示 `bbr`，同时按第 9.5 节检查用户、代理和流量上报。恢复旧拥塞算法后也应重启监听器并重连验证。Xray 重启会重置其内存流量计数，重启前后的账本核对不能省略。
+
+系统后续正常重启时会加载 sysctl 配置；其他运维工具或更晚加载的配置可能覆盖这些值，重启后仍需检查。此功能不调整 TCP 缓冲区、内存上限或网卡限速。源码中的开关不代表旧 tag 已包含该功能，须先构建并发布新 release。
+
+依据：[Linux TCP sysctl](https://docs.kernel.org/networking/ip-sysctl.html#tcp-variables)、[默认队列说明](https://docs.kernel.org/admin-guide/sysctl/net.html#default-qdisc)、[Google BBR 快速说明](https://github.com/google/bbr/blob/master/Documentation/bbr-quick-start.md)。
 
 ## 5. 发布与首次部署
 

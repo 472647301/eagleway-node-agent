@@ -13,6 +13,7 @@
     "scripts/uninstall-ubuntu.sh",
     "scripts/node-runtime.sh",
     "scripts/agent-firewall.sh",
+    "scripts/agent-bbr.sh",
     "scripts/eagleway-agent-pm2",
     "scripts/pm2-eagleway-agent.service",
     "scripts/eagleway-node-agent.sudoers",
