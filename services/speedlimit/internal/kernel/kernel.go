@@ -220,7 +220,7 @@ func (d *Driver) Reconcile(rates map[uint32]int) error {
 
 // Cleanup is explicit. A crashing/restarting process leaves rules in place.
 func (d *Driver) Cleanup() error {
-	before, owned, e := d.journal()
+	_, owned, e := d.journal()
 	if e != nil || !owned {
 		return e
 	}
@@ -255,14 +255,11 @@ func (d *Driver) Cleanup() error {
 	if e != nil {
 		return e
 	}
-	kind, e := defaultRoot(restored)
-	if e != nil {
+	if _, e = defaultRoot(restored); e != nil {
 		return e
 	}
-	if kind != before.RootKind {
-		return fmt.Errorf("kernel restored %s, expected %s; retaining ownership journal", kind, before.RootKind)
-	}
-	// Deleting an owned root restores the kernel's default queues. Keep the
-	// allocations file: old conntrack entries must never collide on re-enable.
+	// Deleting our root uses the kernel's current defaults. BBR or an
+	// administrator may have changed them since the journal was created.
+	// Keep allocations: old conntrack marks must never collide on re-enable.
 	return os.Remove(d.Dir + "/ownership.json")
 }

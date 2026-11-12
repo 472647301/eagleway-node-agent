@@ -96,6 +96,67 @@ func mustRoots(t *testing.T, d *Driver) []qdisc {
 	}
 	return v
 }
+
+func TestCleanupAllowsChangedKernelDefaultAndRetriesPartialCleanup(t *testing.T) {
+	for _, ownedRootPresent := range []bool{true, false} {
+		t.Run(fmt.Sprintf("owned_root_present_%t", ownedRootPresent), func(t *testing.T) {
+			d := Driver{Iface: "eth0", Dir: t.TempDir()}
+			journalPath := d.Dir + "/ownership.json"
+			if err := policy.Save(journalPath, ownership{"eth0", "fq_codel"}); err != nil {
+				t.Fatal(err)
+			}
+			allocationsPath := d.Dir + "/policies.json"
+			if err := os.WriteFile(allocationsPath, []byte("persisted marks"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			rootPresent := ownedRootPresent
+			tablePresent := ownedRootPresent
+			old := command
+			t.Cleanup(func() { command = old })
+			command = func(input, name string, args ...string) ([]byte, error) {
+				switch name + " " + strings.Join(args, " ") {
+				case "tc -j qdisc show dev eth0":
+					if rootPresent {
+						return []byte(`[{"kind":"htb","handle":"ea71:","root":true}]`), nil
+					}
+					return []byte(`[{"kind":"fq","handle":"0:","root":true}]`), nil
+				case "nft list tables":
+					if tablePresent {
+						return []byte("table inet " + table + "\n"), nil
+					}
+					return nil, nil
+				case "nft list chain inet eagleway_download_limit eagleway_managed_v1":
+					return nil, nil
+				case "nft delete table inet eagleway_download_limit":
+					tablePresent = false
+					return nil, nil
+				case "tc qdisc del dev eth0 root handle ea71:":
+					rootPresent = false
+					return nil, nil
+				default:
+					t.Fatalf("unexpected command: %s %v", name, args)
+					return nil, nil
+				}
+			}
+			if err := d.Cleanup(); err != nil {
+				t.Fatal(err)
+			}
+			if rootPresent || tablePresent {
+				t.Fatal("owned rules survived cleanup")
+			}
+			if _, err := os.Stat(journalPath); !os.IsNotExist(err) {
+				t.Fatal("completed cleanup retained ownership journal", err)
+			}
+			if data, err := os.ReadFile(allocationsPath); err != nil || string(data) != "persisted marks" {
+				t.Fatal("cleanup changed persisted marks", err)
+			}
+			if err := d.Cleanup(); err != nil {
+				t.Fatal("cleanup retry failed", err)
+			}
+		})
+	}
+}
+
 func TestCommandFailureRetainsRecoveryJournal(t *testing.T) {
 	d := Driver{Iface: "eth0", Dir: t.TempDir()}
 	old := command

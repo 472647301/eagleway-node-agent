@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common'
+import { ScheduleModule } from '@nestjs/schedule'
 import { HealthController } from './health/health.controller'
 import { StateModule } from './state/state.module'
 import { OperationsModule } from './operations/operations.module'
@@ -12,6 +13,7 @@ import { LogModule } from './logs/log.module'
   imports: [
     AgentConfigModule,
     StateModule,
+    ScheduleModule.forRoot(),
     OperationsModule,
     HostModule,
     XrayModule,

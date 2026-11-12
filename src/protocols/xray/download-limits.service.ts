@@ -1,4 +1,9 @@
-import { Inject, Injectable, type OnModuleInit } from '@nestjs/common'
+import {
+  Inject,
+  Injectable,
+  Logger,
+  type OnApplicationBootstrap
+} from '@nestjs/common'
 import { Interval } from '@nestjs/schedule'
 import { request } from 'node:http'
 import { existsSync } from 'node:fs'
@@ -23,7 +28,8 @@ export interface DownloadLimitStatus {
 }
 
 @Injectable()
-export class DownloadLimitsService implements OnModuleInit {
+export class DownloadLimitsService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(DownloadLimitsService.name)
   private reconciling = false
   private applyErrorRevision: number | null = null
 
@@ -32,7 +38,8 @@ export class DownloadLimitsService implements OnModuleInit {
     private readonly state: StateStoreService
   ) {}
 
-  onModuleInit() {
+  onApplicationBootstrap(): void {
+    // StateModule initializes SQLite in its application bootstrap hook.
     void this.reconcile()
   }
 
@@ -67,7 +74,7 @@ export class DownloadLimitsService implements OnModuleInit {
     return this.status()
   }
 
-  @Interval(30_000)
+  @Interval('xray-download-limits', 30_000)
   async reconcile() {
     if (!this.config.speedLimitEnabled || this.reconciling) return
     this.reconciling = true
@@ -79,6 +86,11 @@ export class DownloadLimitsService implements OnModuleInit {
         if (latest?.revision === desired.revision) break
         desired = latest
       }
+    } catch (error) {
+      this.logger.error(
+        'Download limit reconciliation failed',
+        error instanceof Error ? error.stack : undefined
+      )
     } finally {
       this.reconciling = false
     }
