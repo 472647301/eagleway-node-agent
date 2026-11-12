@@ -14,6 +14,16 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.11'
+          cache-dependency-path: services/speedlimit/go.sum
+      - run: go test -race ./...
+        working-directory: services/speedlimit
+      - run: CGO_ENABLED=0 go build -trimpath -o bin/eagleway-speedlimit ./cmd/eagleway-speedlimit
+        working-directory: services/speedlimit
+      - run: sudo apt-get update && sudo apt-get install -y iproute2 nftables
+      - run: bash scripts/test-speedlimit-kernel.sh
       - uses: pnpm/action-setup@v4
         with:
           version: 11.22.0
@@ -27,3 +37,5 @@ jobs:
       - run: sh -n scripts/eagleway-agent-pm2 scripts/eagleway-node-helper
       - run: pnpm verify
       - run: bash scripts/test-xray-runtime.sh
+        env:
+          XRAY_TEST_DOWNLOAD_LIMITS: 'true'

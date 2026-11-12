@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common'
+import { DownloadLimitsService } from './download-limits.service'
 import { IpAllowlistGuard } from '@/security/ip-allowlist.guard'
 import { XrayAssignmentsService } from './xray-assignments.service'
 import { XrayClient } from './xray.client'
@@ -9,6 +10,7 @@ import { XrayService } from './xray.service'
 @Module({
   controllers: [XrayController],
   providers: [
+    DownloadLimitsService,
     IpAllowlistGuard,
     XrayClient,
     XrayAssignmentsService,

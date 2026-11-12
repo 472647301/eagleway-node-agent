@@ -29,3 +29,8 @@ NODE
 unzip -q "$XRAY_TEST_ARCHIVE" xray -d "$xray_test_dir"
 chmod 0755 "$xray_test_dir/xray"
 XRAY_TEST_BINARY="$xray_test_dir/xray" pnpm test:xray
+
+if [[ "${XRAY_TEST_DOWNLOAD_LIMITS:-false}" == true ]]; then
+  sudo unshare --net python3 scripts/test-speedlimit-traffic.py \
+    "$xray_test_dir/xray" "$PWD/services/speedlimit/bin/eagleway-speedlimit"
+fi

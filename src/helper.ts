@@ -33,7 +33,11 @@ import {
 } from './host/certificate-renewal'
 import { downloadVerifiedArtifact } from './host/artifact-downloader'
 import { xrayArtifact, xrayRelease } from './host/xray-release'
-import { xrayConfig } from './protocols/xray/runtime-config'
+import {
+  updateDownloadLimitRouting,
+  xrayConfig
+} from './protocols/xray/runtime-config'
+import { parse as parseEnv } from 'dotenv'
 import {
   BAOTA_NGINX_BINARY,
   BAOTA_NGINX_VHOST_DIRECTORY,
@@ -142,6 +146,10 @@ async function main(): Promise<void> {
       assertNoArgument(argument)
       prepareRuntimeLogs()
       break
+    case 'xray-speed-limit-config':
+      assertNoArgument(argument)
+      updateSpeedLimitConfig()
+      break
     default:
       fail('Unsupported helper action')
   }
@@ -190,7 +198,7 @@ async function install(plan: InstallPlan): Promise<void> {
     const certificate = ensureCertificate(plan)
     atomicWrite(
       runtimeConfigPath,
-      `${JSON.stringify(xrayConfig(plan, certificate), null, 2)}\n`,
+      `${JSON.stringify(xrayConfig({ ...plan, speedLimitEnabled: speedLimitEnabled() }, certificate), null, 2)}\n`,
       0o600
     )
     prepareRuntimeLogs()
@@ -231,7 +239,7 @@ async function applyConfig(plan: InstallPlan): Promise<void> {
     const backupPath = join(runtimeDir, `.config.backup-${process.pid}.json`)
     atomicWrite(
       candidatePath,
-      `${JSON.stringify(xrayConfig(plan, certificate), null, 2)}\n`,
+      `${JSON.stringify(xrayConfig({ ...plan, speedLimitEnabled: speedLimitEnabled() }, certificate), null, 2)}\n`,
       0o600
     )
     prepareRuntimeLogs()
@@ -1249,6 +1257,60 @@ function safeRemove(path: string): void {
 }
 
 class HelperFailure extends Error {}
+
+function speedLimitEnabled(): boolean {
+  const path = '/etc/eagleway-node-agent/agent.env'
+  if (!existsSync(path)) return false
+  const metadata = statSync(path)
+  if (metadata.uid !== 0 || (metadata.mode & 0o022) !== 0) {
+    fail('Agent environment must be root-owned and not writable by other users')
+  }
+  const value = parseEnv(readFileSync(path)).AGENT_ENABLE_SPEED_LIMIT ?? 'false'
+  if (!['true', 'false'].includes(value))
+    fail('Invalid AGENT_ENABLE_SPEED_LIMIT')
+  return value === 'true'
+}
+
+function updateSpeedLimitConfig(): void {
+  if (!isManagedRuntime() || !existsSync(runtimeConfigPath)) return
+  const previous = readFileSync(runtimeConfigPath, 'utf8')
+  const config = JSON.parse(previous)
+  const inbound = config.inbounds?.find((item: { tag?: string }) =>
+    item.tag?.startsWith('eagleway-')
+  )
+  if (!inbound) fail('Managed Xray inbound is missing')
+  const desired = updateDownloadLimitRouting(
+    inbound.protocol,
+    speedLimitEnabled(),
+    config.routing
+  )
+  if (JSON.stringify(config.routing) === JSON.stringify(desired)) return
+  if (desired) config.routing = desired
+  else delete config.routing
+  const candidate = join(runtimeDir, `.speed-limit-next-${process.pid}.json`)
+  atomicWrite(candidate, `${JSON.stringify(config, null, 2)}\n`, 0o600)
+  const wasActive =
+    run(
+      '/usr/bin/systemctl',
+      ['is-active', '--quiet', 'eagleway-xray.service'],
+      false
+    ).status === 0
+  let replaced = false
+  try {
+    run(runtimeBinary, ['run', '-test', '-config', candidate])
+    renameSync(candidate, runtimeConfigPath)
+    replaced = true
+    if (wasActive) systemctl('restart', 'eagleway-xray.service')
+  } catch (error) {
+    if (replaced) {
+      atomicWrite(runtimeConfigPath, previous, 0o600)
+      if (wasActive) systemctl('restart', 'eagleway-xray.service')
+    }
+    throw error
+  } finally {
+    safeRemove(candidate)
+  }
+}
 
 function fail(message: string): never {
   throw new HelperFailure(message)

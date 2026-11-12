@@ -105,6 +105,12 @@ env_value() {
 AGENT_PORT="$(env_value PORT || true)"
 ALLOWED_CIDRS="$(env_value ALLOWED_CIDRS || true)"
 
+if [[ -e /var/lib/eagleway-speedlimit/ownership.json || -e /etc/systemd/system/eagleway-speedlimit.service ]]; then
+  SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  . "${SCRIPT_DIR}/agent-speedlimit.sh"
+  disable_agent_speedlimit "${INSTALL_ROOT}/current"
+fi
+
 # Undo only our host tuning, including with --keep-data, before deleting releases.
 if [[ -e "${AGENT_BBR_CONFIG_FILE}" || -L "${AGENT_BBR_CONFIG_FILE}" ]]; then
   SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"

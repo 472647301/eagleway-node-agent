@@ -83,3 +83,26 @@ export class ProtocolUserUpdateDto extends NodeRequestDto {
   @IsUUID(undefined, { each: true })
   assignmentIds?: string[]
 }
+
+export class DownloadLimitDto {
+  @IsUUID()
+  assignmentId!: string
+
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000)
+  downloadLimitMbps!: number
+}
+
+export class DownloadLimitSyncDto extends NodeRequestDto {
+  @IsInt()
+  @Min(1)
+  @Max(Number.MAX_SAFE_INTEGER)
+  revision!: number
+
+  @IsArray()
+  @ArrayMaxSize(10_000)
+  @ValidateNested({ each: true })
+  @Type(() => DownloadLimitDto)
+  limits!: DownloadLimitDto[]
+}

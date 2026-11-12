@@ -1,4 +1,5 @@
-import { HttpStatus, Inject, Injectable } from '@nestjs/common'
+import { HttpStatus, Inject, Injectable, Optional } from '@nestjs/common'
+import { DownloadLimitsService } from './download-limits.service'
 import { createHash } from 'node:crypto'
 import { AgentError, invalidRequest } from '@/common/api/agent-error'
 import { APP_CONFIG, type AppConfig } from '@/config/app-config'
@@ -8,6 +9,7 @@ import { XrayAssignmentsService } from './xray-assignments.service'
 import { XrayClient } from './xray.client'
 import type {
   NodeRequestDto,
+  DownloadLimitSyncDto,
   ProtocolControlDto,
   ProtocolUserSyncDto,
   ProtocolUserUpdateDto
@@ -23,7 +25,8 @@ export class XrayService {
     private readonly provisioning: XrayProvisioningService,
     private readonly assignments: XrayAssignmentsService,
     private readonly operations: OperationCoordinatorService,
-    private readonly state: StateStoreService
+    private readonly state: StateStoreService,
+    @Optional() private readonly downloadLimits?: DownloadLimitsService
   ) {}
 
   async install(protocolValue: string, body: ProtocolControlDto) {
@@ -209,6 +212,13 @@ export class XrayService {
     return this.assignments.sync(protocol, body.users)
   }
 
+  async syncDownloadLimits(protocolValue: string, body: DownloadLimitSyncDto) {
+    const protocol = this.protocol(protocolValue)
+    this.assertNode(body.nodeId)
+    this.assertInstalledProtocol(protocol, false)
+    return this.downloadLimits!.sync(protocol, body)
+  }
+
   async updateUsers(protocolValue: string, body: ProtocolUserUpdateDto) {
     const protocol = this.protocol(protocolValue)
     this.assertNode(body.nodeId)
@@ -285,6 +295,7 @@ export class XrayService {
       nodeId: this.config.nodeId,
       protocol,
       runtime: 'xray-core',
+      downloadLimits: await this.downloadLimits?.status(),
       runtimeVersion: await this.client.version(),
       state: runtimeState,
       startedAt: null,

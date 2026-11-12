@@ -22,6 +22,7 @@ export interface AppConfig {
   acmeEmail: string | null
   privilegedHelper: string
   operationTimeoutSeconds: number
+  speedLimitEnabled?: boolean
 }
 
 export const APP_CONFIG = Symbol('APP_CONFIG')
@@ -63,6 +64,7 @@ export function loadAppConfig(env = process.env): AppConfig {
       'REPORT_INTERVAL_SECONDS'
     ),
     reportingEnabled,
+    speedLimitEnabled: booleanValue(env.AGENT_ENABLE_SPEED_LIMIT, false),
     stateDir,
     stateKeyPath: resolve(
       env.STATE_KEY_PATH ??

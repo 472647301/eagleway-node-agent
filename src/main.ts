@@ -14,6 +14,8 @@ async function bootstrap(): Promise<void> {
   })
   const config = app.get<AppConfig>(APP_CONFIG)
   app.setGlobalPrefix('api')
+  // A full snapshot of 10,000 assignment IDs and integer rates fits in 1 MiB.
+  app.useBodyParser('json', { limit: '1mb' })
   app.set('trust proxy', config.trustProxy ? 'loopback' : false)
   app.use(helmet())
   app.use(compression())

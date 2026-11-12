@@ -6,6 +6,8 @@ Eagleway Node Agent 是 Eagleway Network VPN 代理应用部署在自有 VPS 上
 
 ## 项目定位
 
+节点可按 `userId + platform` 限制下载速度。`AGENT_ENABLE_SPEED_LIMIT` 默认关闭，启用、回滚及实测步骤见[下载限速运维说明](docs/download-limits.md)。
+
 - 项目名：`eagleway-node-agent`
 - 当前版本协议：Trojan、VLESS、VMess
 - 统一运行时：`xray-core`

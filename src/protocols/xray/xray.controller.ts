@@ -12,6 +12,7 @@ import { success } from '@/common/api/api-response'
 import { IpAllowlistGuard } from '@/security/ip-allowlist.guard'
 import {
   NodeRequestDto,
+  DownloadLimitSyncDto,
   ProtocolControlDto,
   ProtocolUserSyncDto,
   ProtocolUserUpdateDto
@@ -23,6 +24,15 @@ import { XrayService } from './xray.service'
 @Controller(':protocol')
 export class XrayController {
   constructor(private readonly service: XrayService) {}
+
+  @Post('download-limits/sync')
+  @HttpCode(HttpStatus.OK)
+  async syncDownloadLimits(
+    @Param('protocol') protocol: string,
+    @Body() body: DownloadLimitSyncDto
+  ) {
+    return success(await this.service.syncDownloadLimits(protocol, body))
+  }
 
   @Post('install')
   @HttpCode(HttpStatus.ACCEPTED)

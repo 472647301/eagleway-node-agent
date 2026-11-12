@@ -65,6 +65,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/agent-firewall.sh"
 # shellcheck source=agent-bbr.sh
 . "${SCRIPT_DIR}/agent-bbr.sh"
+. "${SCRIPT_DIR}/agent-speedlimit.sh"
 RELEASE_SOURCE_DIR="$(realpath "${1:-${SCRIPT_DIR}/..}")"
 ENV_FILE_INPUT="${2:-${RELEASE_SOURCE_DIR}/.env}"
 [[ -f "${ENV_FILE_INPUT}" ]] || { echo "Missing environment file: ${ENV_FILE_INPUT}" >&2; exit 1; }
@@ -125,6 +126,9 @@ AGENT_FIREWALL_MANAGER="$(env_value AGENT_FIREWALL_MANAGER || true)"
 AGENT_FIREWALL_MANAGER="${AGENT_FIREWALL_MANAGER:-auto}"
 AGENT_ENABLE_BBR="$(env_value AGENT_ENABLE_BBR || true)"
 AGENT_ENABLE_BBR="${AGENT_ENABLE_BBR:-false}"
+AGENT_ENABLE_SPEED_LIMIT="$(env_value AGENT_ENABLE_SPEED_LIMIT || true)"
+AGENT_ENABLE_SPEED_LIMIT="${AGENT_ENABLE_SPEED_LIMIT:-false}"
+AGENT_SPEED_LIMIT_INTERFACE="$(env_value AGENT_SPEED_LIMIT_INTERFACE || true)"
 REPORTING_ENABLED="$(required_env REPORTING_ENABLED)"
 CENTER_API_URL="$(env_value CENTER_API_URL || true)"
 
@@ -160,6 +164,7 @@ esac
   && -f "${RELEASE_SOURCE_DIR}/scripts/node-runtime.sh" \
   && -f "${RELEASE_SOURCE_DIR}/scripts/agent-firewall.sh" \
   && -f "${RELEASE_SOURCE_DIR}/scripts/agent-bbr.sh" \
+  && -f "${RELEASE_SOURCE_DIR}/scripts/agent-speedlimit.sh" \
   && -f "${RELEASE_SOURCE_DIR}/scripts/eagleway-agent-pm2" \
   && -f "${RELEASE_SOURCE_DIR}/scripts/pm2-eagleway-agent.service" \
   && -f "${RELEASE_SOURCE_DIR}/scripts/eagleway-node-helper" \
@@ -186,6 +191,9 @@ if [[ "${REPORTING_ENABLED}" == "true" && -z "${CENTER_API_URL}" ]]; then
   echo "CENTER_API_URL is required when REPORTING_ENABLED=true" >&2
   exit 1
 fi
+[[ "${AGENT_ENABLE_SPEED_LIMIT}" == true || "${AGENT_ENABLE_SPEED_LIMIT}" == false ]] || {
+  echo "AGENT_ENABLE_SPEED_LIMIT must be true or false" >&2; exit 1;
+}
 assert_fixed_env STATE_DIR "${STATE_ROOT}"
 assert_fixed_env STATE_KEY_PATH "${CONFIG_ROOT}/state.key"
 assert_fixed_env LOG_DIR "${LOG_ROOT}"
@@ -199,11 +207,17 @@ if [[ "${OS_FAMILY}" == "ubuntu" ]]; then
   export DEBIAN_FRONTEND=noninteractive
   run_apt_get update
   run_apt_get install -y --no-install-recommends ca-certificates curl rsync sudo unzip xz-utils
+  if [[ "${AGENT_ENABLE_SPEED_LIMIT}" == true ]]; then
+    run_apt_get install -y --no-install-recommends iproute2 nftables kmod
+  fi
   if [[ "${AGENT_ENABLE_BBR}" == true ]]; then
     run_apt_get install -y --no-install-recommends procps kmod
   fi
 else
   run_dnf install -y ca-certificates curl rsync shadow-utils sudo unzip util-linux xz
+  if [[ "${AGENT_ENABLE_SPEED_LIMIT}" == true ]]; then
+    run_dnf install -y iproute iproute-tc nftables kmod
+  fi
   if [[ "${AGENT_ENABLE_BBR}" == true ]]; then
     run_dnf install -y procps-ng kmod
   fi
@@ -298,6 +312,7 @@ PM2_CLI="${RELEASE_DIR}/node_modules/pm2/bin/pm2"
 # Apply optional host tuning only after release/config validation, before stopping
 # the existing Agent. Failures restore BBR writes without switching the release.
 configure_agent_bbr "${AGENT_ENABLE_BBR}" "${AGENT_BBR_CONFIG_FILE}"
+prepare_agent_speedlimit "${AGENT_ENABLE_SPEED_LIMIT}" "${AGENT_SPEED_LIMIT_INTERFACE}" "${RELEASE_DIR}"
 
 # Stop the old daemon too: replacing Node on disk does not update a running PM2.
 if systemctl cat pm2-eagleway-agent.service >/dev/null 2>&1; then
@@ -331,6 +346,24 @@ chown "${AGENT_USER}:${AGENT_USER}" "${CONFIG_ROOT}/state.key"
 chmod 0600 "${CONFIG_ROOT}/state.key"
 ln -sfn "${CONFIG_ROOT}/agent.env" "${INSTALL_ROOT}/current/.env"
 
+# Only enable/disable changes the webhook configuration and may restart Xray.
+# Ordinary policy changes never enter this deployment path.
+SPEED_LIMIT_ERROR_FILE="${CONFIG_ROOT}/speedlimit-error"
+SPEED_LIMIT_ERROR=''
+if /usr/local/libexec/eagleway-node-helper xray-speed-limit-config; then
+  if [[ "${AGENT_ENABLE_SPEED_LIMIT}" == false ]]; then
+    disable_agent_speedlimit "${RELEASE_DIR}" || SPEED_LIMIT_ERROR='Could not remove the managed download limit rules'
+  fi
+else
+  SPEED_LIMIT_ERROR='Could not reconcile the Xray download limit webhook'
+fi
+if [[ -n "${SPEED_LIMIT_ERROR}" ]]; then
+  printf '%s\n' "${SPEED_LIMIT_ERROR}" > "${SPEED_LIMIT_ERROR_FILE}"
+  chmod 0644 "${SPEED_LIMIT_ERROR_FILE}"
+elif [[ -e "${SPEED_LIMIT_ERROR_FILE}" ]]; then
+  rm -f -- "${SPEED_LIMIT_ERROR_FILE}"
+fi
+
 (
   # PM2 inherits cwd when spawning its daemon; use a service-user-accessible directory.
   cd "${AGENT_HOME}"
@@ -351,3 +384,7 @@ configure_agent_firewall "${AGENT_FIREWALL_MANAGER}" "${AGENT_PORT}" \
 
 echo "Eagleway Node Agent installed in ${RELEASE_DIR}"
 echo "Runtime: Node.js ${NODE_VERSION} (${NODE_BIN}); PM2: /usr/local/bin/eagleway-agent-pm2"
+if [[ -n "${SPEED_LIMIT_ERROR}" ]]; then
+  echo "${SPEED_LIMIT_ERROR}. Agent is running. Correct the reported error and rerun deployment." >&2
+  exit 1
+fi

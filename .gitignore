@@ -1,4 +1,6 @@
 node_modules/
+.work/
+services/speedlimit/bin/
 dist/
 coverage/
 /logs/
